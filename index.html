@@ -1,0 +1,529 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Save, Spend, Share - Family Allowance Tracker</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'save': '#10b981',
+                        'spend': '#3b82f6', 
+                        'share': '#ef4444'
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <!-- Header -->
+    <header class="bg-white shadow-sm border-b-2 border-blue-200">
+        <div class="max-w-6xl mx-auto px-4 py-6">
+            <h1 class="text-3xl font-bold text-center text-gray-800">
+                🏠 Save, Spend, Share
+            </h1>
+            <p class="text-center text-gray-600 mt-2">Family Allowance Tracker</p>
+        </div>
+    </header>
+
+    <!-- Navigation (shown after setup) -->
+    <nav id="main-navigation" class="bg-white shadow-sm border-b border-gray-200 hidden">
+        <div class="max-w-6xl mx-auto px-4">
+            <div class="flex space-x-8">
+                <button id="nav-kids" onclick="showKidsDashboard()" class="nav-tab py-4 px-1 border-b-2 border-blue-500 text-blue-600 font-medium">
+                    👧👦 Kids Dashboard
+                </button>
+                <button id="nav-parent" onclick="showParentDashboard()" class="nav-tab py-4 px-1 border-b-2 border-transparent text-gray-500 hover:text-gray-700 font-medium">
+                    🔧 Parent Dashboard
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <main class="max-w-6xl mx-auto px-4 py-8">
+        <!-- Setup Wizard (shown initially) -->
+        <div id="setup-wizard" class="hidden">
+            <div class="bg-white rounded-lg shadow-lg p-8 max-w-2xl mx-auto">
+                <h2 class="text-2xl font-bold text-center mb-6 text-gray-800">
+                    🎯 Let's Set Up Your Family!
+                </h2>
+                
+                <!-- Step 1: Kids Info -->
+                <div id="setup-step-1" class="setup-step">
+                    <h3 class="text-xl font-semibold mb-4 text-gray-700">Step 1: Tell us about your kids</h3>
+                    
+                    <div id="kids-container">
+                        <!-- Kid 1 -->
+                        <div class="kid-setup mb-6 p-4 border-2 border-gray-200 rounded-lg">
+                            <h4 class="font-semibold mb-3 text-gray-600">Child 1</h4>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Name</label>
+                                    <input type="text" class="kid-name w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Enter name">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Birthday</label>
+                                    <input type="date" class="kid-birthday w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                </div>
+                            </div>
+                            <div class="mt-2 text-sm text-gray-600">
+                                <span class="current-age-display">Age will be calculated from birthday</span>
+                            </div>
+                        </div>
+
+                        <!-- Kid 2 -->
+                        <div class="kid-setup mb-6 p-4 border-2 border-gray-200 rounded-lg">
+                            <h4 class="font-semibold mb-3 text-gray-600">Child 2</h4>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Name</label>
+                                    <input type="text" class="kid-name w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Enter name">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Birthday</label>
+                                    <input type="date" class="kid-birthday w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                </div>
+                            </div>
+                            <div class="mt-2 text-sm text-gray-600">
+                                <span class="current-age-display">Age will be calculated from birthday</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="flex justify-end">
+                        <button onclick="nextSetupStep()" class="bg-blue-500 hover:bg-blue-600 text-white px-6 py-2 rounded-lg font-medium">
+                            Next: Starting Balances →
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Step 2: Starting Balances -->
+                <div id="setup-step-2" class="setup-step hidden">
+                    <h3 class="text-xl font-semibold mb-4 text-gray-700">Step 2: Enter starting balances</h3>
+                    <div id="balances-container">
+                        <!-- Will be populated by JavaScript -->
+                    </div>
+                    <div class="flex justify-between mt-6">
+                        <button onclick="prevSetupStep()" class="bg-gray-500 hover:bg-gray-600 text-white px-6 py-2 rounded-lg font-medium">
+                            ← Back
+                        </button>
+                        <button onclick="nextSetupStep()" class="bg-blue-500 hover:bg-blue-600 text-white px-6 py-2 rounded-lg font-medium">
+                            Next: Savings Goals →
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Step 3: Savings Goals -->
+                <div id="setup-step-3" class="setup-step hidden">
+                    <h3 class="text-xl font-semibold mb-4 text-gray-700">Step 3: Set savings goals (optional)</h3>
+                    <div id="goals-container">
+                        <!-- Will be populated by JavaScript -->
+                    </div>
+                    <div class="flex justify-between mt-6">
+                        <button onclick="prevSetupStep()" class="bg-gray-500 hover:bg-gray-600 text-white px-6 py-2 rounded-lg font-medium">
+                            ← Back
+                        </button>
+                        <button onclick="completeSetup()" class="bg-green-500 hover:bg-green-600 text-white px-6 py-2 rounded-lg font-medium">
+                            🎉 Complete Setup
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Catch-Up Alert (shown when needed) -->
+        <div id="catchup-alert" class="hidden mb-6">
+            <div class="bg-yellow-50 border-l-4 border-yellow-400 p-4 rounded-lg">
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center">
+                        <div class="text-yellow-400 text-2xl mr-3">⚠️</div>
+                        <div>
+                            <h3 class="text-lg font-medium text-yellow-800">Welcome back!</h3>
+                            <p id="catchup-message" class="text-yellow-700"></p>
+                        </div>
+                    </div>
+                    <div class="flex space-x-3">
+                        <button onclick="showCatchupReview()" class="bg-yellow-500 hover:bg-yellow-600 text-white px-4 py-2 rounded-lg font-medium">
+                            Review Missed Allowances
+                        </button>
+                        <button onclick="addAllMissedAllowances()" class="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-lg font-medium">
+                            Add All Automatically
+                        </button>
+                        <button onclick="dismissCatchupAlert()" class="text-yellow-600 hover:text-yellow-800 px-2">
+                            ✕
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Kids Dashboard -->
+        <div id="kids-dashboard-view" class="hidden">
+            <!-- Next Allowance Card -->
+            <div id="next-allowance-card" class="bg-gradient-to-r from-blue-500 to-purple-600 text-white rounded-lg shadow-lg p-8 mb-8 text-center">
+                <h2 class="text-2xl font-bold mb-4">📅 Next Allowance</h2>
+                <p id="next-allowance-date" class="text-5xl font-bold mb-2"></p>
+                <p id="next-allowance-countdown" class="text-xl text-blue-100"></p>
+            </div>
+
+            <!-- Kids' Balance Cards -->
+            <div id="kids-balance-cards" class="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
+                <!-- Will be populated by JavaScript -->
+            </div>
+
+            <!-- Recent Activity for Kids -->
+            <div class="bg-white rounded-lg shadow-lg p-6">
+                <h2 class="text-xl font-bold mb-4 text-gray-800">📈 Recent Activity</h2>
+                <div id="kids-recent-transactions" class="space-y-2">
+                    <!-- Will be populated by JavaScript -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Parent Dashboard -->
+        <div id="parent-dashboard-view" class="hidden">
+            <!-- Record Transaction -->
+            <div class="bg-white rounded-lg shadow-lg p-6 mb-8">
+                <h2 class="text-xl font-bold mb-4 text-gray-800">💰 Record Transaction</h2>
+                
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Child</label>
+                        <select id="transaction-kid" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <!-- Will be populated by JavaScript -->
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Bucket</label>
+                        <select id="transaction-bucket" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <option value="save">💰 Save</option>
+                            <option value="spend">🛍️ Spend</option>
+                            <option value="share">❤️ Share</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Amount</label>
+                        <input type="number" id="transaction-amount" step="0.01" min="0" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="0.00">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Description</label>
+                        <input type="text" id="transaction-description" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="What was this for?">
+                    </div>
+                </div>
+                
+                <div class="flex flex-wrap gap-3 justify-center">
+                    <button onclick="addMoney()" class="bg-green-500 hover:bg-green-600 text-white px-6 py-2 rounded-lg font-medium">
+                        💰 Add Money
+                    </button>
+                    <button onclick="recordSpending()" class="bg-red-500 hover:bg-red-600 text-white px-6 py-2 rounded-lg font-medium">
+                        💸 Record Spending
+                    </button>
+                </div>
+            </div>
+
+            <!-- Administrative Actions -->
+            <div class="bg-white rounded-lg shadow-lg p-6 mb-8">
+                <h2 class="text-xl font-bold mb-4 text-gray-800">🔧 Administrative Actions</h2>
+                
+                <div class="flex flex-wrap gap-3">
+                    <button onclick="confirmAddWeeklyAllowance()" class="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-lg font-medium">
+                        📅 Add Weekly Allowance
+                    </button>
+                    <button id="undo-allowance-btn" onclick="undoLastAllowance()" class="bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded-lg font-medium hidden">
+                        ↩️ Undo Last Allowance
+                    </button>
+                    <button onclick="showTransactionHistory()" class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg font-medium">
+                        📊 View History
+                    </button>
+                    <button onclick="backupData()" class="bg-purple-500 hover:bg-purple-600 text-white px-4 py-2 rounded-lg font-medium">
+                        💾 Backup Data
+                    </button>
+                </div>
+            </div>
+
+            <!-- Family Management -->
+            <div class="bg-white rounded-lg shadow-lg p-6 mb-8">
+                <h2 class="text-xl font-bold mb-4 text-gray-800">👨‍👩‍👧‍👦 Family Management</h2>
+                <div id="family-management-cards" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <!-- Will be populated by JavaScript -->
+                </div>
+            </div>
+
+            <!-- Parent Analytics -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8">
+                <!-- Summary Stats -->
+                <div class="bg-white rounded-lg shadow-lg p-6">
+                    <h3 class="text-lg font-bold mb-4 text-gray-800">📊 Family Summary</h3>
+                    <div id="family-summary" class="space-y-3">
+                        <!-- Will be populated by JavaScript -->
+                    </div>
+                </div>
+
+                <!-- Goal Progress -->
+                <div class="bg-white rounded-lg shadow-lg p-6">
+                    <h3 class="text-lg font-bold mb-4 text-gray-800">🎯 Goal Progress</h3>
+                    <div id="goals-summary" class="space-y-3">
+                        <!-- Will be populated by JavaScript -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Full Transaction History -->
+            <div class="bg-white rounded-lg shadow-lg p-6">
+                <h2 class="text-xl font-bold mb-4 text-gray-800">📈 All Transactions</h2>
+                <div id="parent-recent-transactions" class="space-y-2">
+                    <!-- Will be populated by JavaScript -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Welcome Screen (shown first time) -->
+        <div id="welcome-screen">
+            <div class="text-center max-w-2xl mx-auto">
+                <div class="bg-white rounded-lg shadow-lg p-8">
+                    <h2 class="text-3xl font-bold mb-4 text-gray-800">
+                        Welcome to Save, Spend, Share! 🎉
+                    </h2>
+                    <p class="text-lg text-gray-600 mb-6">
+                        Help your kids learn about money management with three simple buckets:
+                    </p>
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                        <div class="text-center">
+                            <div class="text-4xl mb-2">💰</div>
+                            <h3 class="font-bold text-save">SAVE</h3>
+                            <p class="text-sm text-gray-600">For future goals</p>
+                        </div>
+                        <div class="text-center">
+                            <div class="text-4xl mb-2">🛍️</div>
+                            <h3 class="font-bold text-spend">SPEND</h3>
+                            <p class="text-sm text-gray-600">For fun purchases</p>
+                        </div>
+                        <div class="text-center">
+                            <div class="text-4xl mb-2">❤️</div>
+                            <h3 class="font-bold text-share">SHARE</h3>
+                            <p class="text-sm text-gray-600">For helping others</p>
+                        </div>
+                    </div>
+                    <button onclick="startSetup()" class="bg-blue-500 hover:bg-blue-600 text-white px-8 py-3 rounded-lg font-medium text-lg">
+                        🚀 Get Started
+                    </button>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Goal Completion Celebration Modal -->
+    <div id="goal-celebration-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white rounded-lg shadow-xl p-8 max-w-md mx-4 text-center">
+            <div class="text-6xl mb-4">🎉</div>
+            <h2 class="text-2xl font-bold text-gray-800 mb-2">Congratulations!</h2>
+            <p id="goal-celebration-message" class="text-lg text-gray-600 mb-6"></p>
+            <div class="space-y-3">
+                <button onclick="setNewGoal()" class="w-full bg-green-500 hover:bg-green-600 text-white px-6 py-3 rounded-lg font-medium">
+                    🎯 Set New Goal
+                </button>
+                <button onclick="closeGoalCelebration()" class="w-full bg-gray-500 hover:bg-gray-600 text-white px-6 py-3 rounded-lg font-medium">
+                    🎊 Celebrate Later
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Transaction History Modal -->
+    <div id="transaction-history-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white rounded-lg shadow-xl p-6 max-w-4xl mx-4 w-full max-h-[80vh] overflow-hidden">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-2xl font-bold text-gray-800">📊 Transaction History</h2>
+                <button onclick="closeTransactionHistory()" class="text-gray-500 hover:text-gray-700 text-2xl">&times;</button>
+            </div>
+            
+            <!-- Filters -->
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4 p-4 bg-gray-50 rounded-lg">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Child</label>
+                    <select id="history-filter-kid" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <option value="">All Kids</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Bucket</label>
+                    <select id="history-filter-bucket" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <option value="">All Buckets</option>
+                        <option value="save">💰 Save</option>
+                        <option value="spend">🛍️ Spend</option>
+                        <option value="share">❤️ Share</option>
+                        <option value="all">📅 Allowance</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Type</label>
+                    <select id="history-filter-type" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <option value="">All Types</option>
+                        <option value="allowance">Allowance</option>
+                        <option value="deduction">Spending</option>
+                        <option value="goal_completed">Goal Completed</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Search</label>
+                    <input type="text" id="history-search" placeholder="Search descriptions..." class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+            </div>
+            
+            <!-- Transaction List -->
+            <div id="transaction-history-list" class="max-h-96 overflow-y-auto space-y-2">
+                <!-- Will be populated by JavaScript -->
+            </div>
+            
+            <div class="mt-4 flex justify-between items-center">
+                <span id="transaction-count" class="text-sm text-gray-600"></span>
+                <button onclick="exportTransactions()" class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg font-medium">
+                    📄 Export CSV
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Goal Management Modal -->
+    <div id="goal-management-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white rounded-lg shadow-xl p-6 max-w-md mx-4 w-full">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xl font-bold text-gray-800">🎯 Manage Savings Goal</h2>
+                <button onclick="closeGoalManagement()" class="text-gray-500 hover:text-gray-700 text-2xl">&times;</button>
+            </div>
+            
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Goal Name</label>
+                    <input type="text" id="goal-name-input" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="e.g., New Bike, Art Set">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Target Amount</label>
+                    <input type="number" id="goal-target-input" step="0.01" min="0" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="0.00">
+                </div>
+            </div>
+            
+            <div class="flex space-x-3 mt-6">
+                <button onclick="saveGoal()" class="flex-1 bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-lg font-medium">
+                    💾 Save Goal
+                </button>
+                <button onclick="removeGoal()" class="flex-1 bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg font-medium">
+                    🗑️ Remove Goal
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Kid Profile Edit Modal -->
+    <div id="kid-profile-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white rounded-lg shadow-xl p-6 max-w-md mx-4 w-full">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xl font-bold text-gray-800">✏️ Edit Kid Profile</h2>
+                <button onclick="closeKidProfileEdit()" class="text-gray-500 hover:text-gray-700 text-2xl">&times;</button>
+            </div>
+            
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Name</label>
+                    <input type="text" id="profile-name-input" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Child's name">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Age</label>
+                    <input type="number" id="profile-age-input" min="1" max="18" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Age">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Birthday</label>
+                    <input type="date" id="profile-birthday-input" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+            </div>
+            
+            <div class="mt-4 p-3 bg-blue-50 rounded-lg">
+                <div class="text-sm text-blue-800">
+                    <strong>Weekly Allowance Preview:</strong>
+                    <span id="allowance-preview">$0.00</span>
+                </div>
+                <div class="text-xs text-blue-600 mt-1">
+                    Allowance is $1.00 per year of age
+                </div>
+            </div>
+            
+            <div class="flex space-x-3 mt-6">
+                <button onclick="closeKidProfileEdit()" class="flex-1 bg-gray-500 hover:bg-gray-600 text-white px-4 py-2 rounded-lg font-medium">
+                    Cancel
+                </button>
+                <button onclick="saveKidProfile()" class="flex-1 bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-lg font-medium">
+                    💾 Save Changes
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Allowance Confirmation Modal -->
+    <div id="allowance-confirmation-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white rounded-lg shadow-xl p-6 max-w-md mx-4 w-full">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xl font-bold text-gray-800">📅 Add Weekly Allowance</h2>
+                <button onclick="closeAllowanceConfirmation()" class="text-gray-500 hover:text-gray-700 text-2xl">&times;</button>
+            </div>
+            
+            <p class="text-gray-600 mb-4">This will add the following amounts:</p>
+            
+            <div id="allowance-preview-list" class="space-y-2 mb-6 p-4 bg-gray-50 rounded-lg">
+                <!-- Will be populated by JavaScript -->
+            </div>
+            
+            <div class="flex space-x-3">
+                <button onclick="closeAllowanceConfirmation()" class="flex-1 bg-gray-500 hover:bg-gray-600 text-white px-4 py-2 rounded-lg font-medium">
+                    Cancel
+                </button>
+                <button onclick="addWeeklyAllowance()" class="flex-1 bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-lg font-medium">
+                    ✅ Add Allowance
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Catch-Up Review Modal -->
+    <div id="catchup-review-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white rounded-lg shadow-xl p-6 max-w-2xl mx-4 w-full">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xl font-bold text-gray-800">📅 Missed Allowance Review</h2>
+                <button onclick="closeCatchupReview()" class="text-gray-500 hover:text-gray-700 text-2xl">&times;</button>
+            </div>
+            
+            <div class="mb-4 p-4 bg-blue-50 rounded-lg">
+                <div class="flex justify-between text-sm text-blue-800">
+                    <span>Last allowance: <span id="last-allowance-date"></span></span>
+                    <span>Today: <span id="current-date"></span></span>
+                </div>
+                <div class="text-center mt-2">
+                    <span class="text-lg font-semibold text-blue-900">Missed weeks: <span id="missed-weeks-count"></span></span>
+                </div>
+            </div>
+            
+            <div class="space-y-4 mb-6">
+                <h3 class="font-semibold text-gray-700">Per Child:</h3>
+                <div id="catchup-kids-container">
+                    <!-- Will be populated by JavaScript -->
+                </div>
+            </div>
+            
+            <div class="flex space-x-3">
+                <button onclick="closeCatchupReview()" class="flex-1 bg-gray-500 hover:bg-gray-600 text-white px-4 py-2 rounded-lg font-medium">
+                    Cancel
+                </button>
+                <button onclick="addSelectedAllowances()" class="flex-1 bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-lg font-medium">
+                    Add Selected Allowances
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
