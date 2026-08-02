@@ -18,101 +18,58 @@ let currentView = 'kids'; // 'kids' or 'parent'
 let missedWeeksData = null; // For catch-up functionality
 let currentEditKidId = null; // For kid profile editing
 
-// Initialize app
+// Initialize app: auth.js's initAuthGate() checks for a session, shows the
+// login screen if needed, and calls loadData()/initializeApp() once signed in.
 document.addEventListener('DOMContentLoaded', function() {
-    loadData();
-    initializeApp();
+    initAuthGate();
 });
 
-// Load data from localStorage with error handling and recovery
-function loadData() {
+// version of the family_data row as last fetched, used for the
+// optimistic-concurrency check in saveData().
+let dataVersion = null;
+
+// Load data from Supabase into the in-memory appData object that the rest
+// of the app reads/mutates exactly like it always has.
+async function loadData() {
     try {
-        const savedData = localStorage.getItem('saveSpendShareData');
-        if (savedData) {
-            // Try to parse the saved data
-            const parsedData = JSON.parse(savedData);
-            
-            // Validate the data structure
-            if (validateDataStructure(parsedData)) {
-                appData = parsedData;
-                console.log('Data loaded successfully from localStorage');
-                
-                // Migrate existing data to birthday-only system
-                migrateToCalculatedAges();
-                
-                showMainDashboard();
-            } else {
-                throw new Error('Invalid data structure detected');
-            }
-        } else {
-            console.log('No saved data found, showing welcome screen');
+        const { data: row, error } = await supabaseClient
+            .from('family_data')
+            .select('data, version')
+            .eq('id', 1)
+            .single();
+
+        if (error) throw error;
+
+        appData = row.data;
+        dataVersion = row.version;
+
+        // Read-only local cache for instant paint / offline viewing only --
+        // never treated as the source of truth on load.
+        localStorage.setItem('saveSpendShareData_cache', JSON.stringify(appData));
+
+        console.log('Data loaded successfully from Supabase');
+
+        // Migrate existing data to birthday-only system
+        await migrateToCalculatedAges();
+
+        if (appData.kids.length === 0) {
             showWelcomeScreen();
+        } else {
+            showMainDashboard();
         }
     } catch (error) {
         console.error('Failed to load data:', error);
-        
-        // Try to load from backup
-        const backupData = localStorage.getItem('saveSpendShareData_backup');
-        if (backupData) {
-            try {
-                const parsedBackup = JSON.parse(backupData);
-                if (validateDataStructure(parsedBackup)) {
-                    appData = parsedBackup;
-                    console.log('Data restored from backup');
-                    
-                    // Save the restored data as current
-                    saveData();
-                    
-                    // Migrate existing data to birthday-only system
-                    migrateToCalculatedAges();
-                    
-                    showMainDashboard();
-                    
-                    alert('Your data was corrupted but has been restored from backup. Please verify your information is correct.');
-                    return;
-                }
-            } catch (backupError) {
-                console.error('Backup data is also corrupted:', backupError);
-            }
-        }
-        
-        // If all else fails, start fresh but warn the user
-        alert('Unable to load your saved data. The app will start fresh. If you have a backup file, you can restore it using the backup feature.');
-        showWelcomeScreen();
+        alert('Unable to load your data. Please check your connection and reload the page.');
     }
-}
-
-// Validate data structure to ensure it has required properties
-function validateDataStructure(data) {
-    if (!data || typeof data !== 'object') return false;
-    
-    // Check for required top-level properties
-    if (!data.kids || !Array.isArray(data.kids)) return false;
-    if (!data.settings || typeof data.settings !== 'object') return false;
-    if (!data.transactions || !Array.isArray(data.transactions)) return false;
-    
-    // Validate each kid has required properties
-    for (const kid of data.kids) {
-        if (!kid.id || !kid.name || !kid.birthday) return false;
-        if (!kid.balances || typeof kid.balances !== 'object') return false;
-        if (typeof kid.balances.save !== 'number' || 
-            typeof kid.balances.spend !== 'number' || 
-            typeof kid.balances.share !== 'number') return false;
-    }
-    
-    // Validate settings structure
-    if (typeof data.settings.rotationWeek !== 'number') return false;
-    
-    return true;
 }
 
 // Migrate existing data to use calculated ages
-function migrateToCalculatedAges() {
+async function migrateToCalculatedAges() {
     let needsMigration = false;
-    
+
     appData.kids.forEach(kid => {
         if (kid.birthday) {
-            const calculatedAge = calculateAge(kid.birthday);
+            const calculatedAge = allowanceLogic.calculateAge(kid.birthday);
             if (kid.age !== calculatedAge) {
                 console.log(`Updating ${kid.name}'s age from ${kid.age} to ${calculatedAge} based on birthday`);
                 kid.age = calculatedAge;
@@ -120,65 +77,62 @@ function migrateToCalculatedAges() {
             }
         }
     });
-    
+
     if (needsMigration) {
-        saveData();
+        await saveData();
     }
 }
 
-// Save data to localStorage with error handling and backup
-function saveData() {
+// Save appData to Supabase, using the row's version as an optimistic
+// concurrency check: if another device saved since we last loaded, this
+// update matches zero rows instead of silently overwriting their change.
+async function saveData() {
     try {
-        // Create a backup of current data before saving new data
-        const currentData = localStorage.getItem('saveSpendShareData');
-        if (currentData) {
-            localStorage.setItem('saveSpendShareData_backup', currentData);
+        const { data: rows, error } = await supabaseClient
+            .from('family_data')
+            .update({
+                data: appData,
+                version: dataVersion + 1,
+                updated_at: new Date().toISOString()
+            })
+            .eq('id', 1)
+            .eq('version', dataVersion)
+            .select();
+
+        if (error) throw error;
+
+        if (!rows || rows.length === 0) {
+            alert('Someone else just saved a change on another device. Reloading the latest data -- please redo your last action.');
+            await loadData();
+            return false;
         }
-        
-        // Save new data
-        const dataToSave = JSON.stringify(appData);
-        localStorage.setItem('saveSpendShareData', dataToSave);
-        
-        // Verify the save was successful by reading it back
-        const savedData = localStorage.getItem('saveSpendShareData');
-        if (!savedData || savedData !== dataToSave) {
-            throw new Error('Data verification failed after save');
-        }
-        
+
+        dataVersion += 1;
+        localStorage.setItem('saveSpendShareData_cache', JSON.stringify(appData));
         console.log('Data saved successfully at', new Date().toISOString());
-        
+        return true;
     } catch (error) {
         console.error('Failed to save data:', error);
-        
-        // Try to restore from backup if save failed
-        const backupData = localStorage.getItem('saveSpendShareData_backup');
-        if (backupData) {
-            try {
-                localStorage.setItem('saveSpendShareData', backupData);
-                console.log('Restored data from backup');
-            } catch (restoreError) {
-                console.error('Failed to restore from backup:', restoreError);
-                alert('Critical error: Unable to save data. Please backup your data immediately using the Backup button.');
-            }
-        } else {
-            alert('Critical error: Unable to save data and no backup available. Please backup your data immediately.');
-        }
+        alert('Unable to save your changes. Please check your connection and try again.');
+        return false;
     }
 }
 
 // Initialize the app based on current state
-function initializeApp() {
+async function initializeApp() {
     // Check if we need to add weekly allowance
-    checkAndAddWeeklyAllowance();
+    await checkAndAddWeeklyAllowance();
     // Check for birthdays and update ages
-    checkBirthdays();
+    await checkBirthdays();
 }
 
 // Show welcome screen
 function showWelcomeScreen() {
     document.getElementById('welcome-screen').classList.remove('hidden');
     document.getElementById('setup-wizard').classList.add('hidden');
-    document.getElementById('main-dashboard').classList.add('hidden');
+    document.getElementById('main-navigation').classList.add('hidden');
+    document.getElementById('kids-dashboard-view').classList.add('hidden');
+    document.getElementById('parent-dashboard-view').classList.add('hidden');
 }
 
 // Start setup process
@@ -219,10 +173,77 @@ function prevSetupStep() {
     }
 }
 
+// Add a new kid setup card during initial setup
+function addKidSetup() {
+    const container = document.getElementById('kids-container');
+    const kidCount = container.querySelectorAll('.kid-setup').length;
+    const newIndex = kidCount;
+    
+    const kidHtml = `
+        <div class="kid-setup mb-6 p-4 border-2 border-gray-200 rounded-lg" data-kid-index="${newIndex}">
+            <div class="flex justify-between items-center mb-3">
+                <h4 class="font-semibold text-gray-600">Child ${newIndex + 1}</h4>
+                <button onclick="removeKidSetup(${newIndex})" class="text-red-500 hover:text-red-700 text-sm font-medium" title="Remove this child">
+                    🗑️ Remove
+                </button>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Name</label>
+                    <input type="text" class="kid-name w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Enter name">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Birthday</label>
+                    <input type="date" class="kid-birthday w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+            </div>
+            <div class="mt-2 text-sm text-gray-600">
+                <span class="current-age-display">Age will be calculated from birthday</span>
+            </div>
+        </div>
+    `;
+    
+    container.insertAdjacentHTML('beforeend', kidHtml);
+}
+
+// Remove a kid setup card during initial setup
+function removeKidSetup(index) {
+    const container = document.getElementById('kids-container');
+    const kidCards = container.querySelectorAll('.kid-setup');
+    
+    // Prevent removing the last kid
+    if (kidCards.length <= 1) {
+        alert('You must have at least one child.');
+        return;
+    }
+    
+    // Find and remove the card with the matching data-kid-index
+    const cardToRemove = container.querySelector(`[data-kid-index="${index}"]`);
+    if (cardToRemove) {
+        cardToRemove.remove();
+        
+        // Reindex remaining cards
+        const remainingCards = container.querySelectorAll('.kid-setup');
+        remainingCards.forEach((card, newIndex) => {
+            card.setAttribute('data-kid-index', newIndex);
+            const title = card.querySelector('h4');
+            title.textContent = `Child ${newIndex + 1}`;
+            const removeBtn = card.querySelector('button[onclick^="removeKidSetup"]');
+            removeBtn.setAttribute('onclick', `removeKidSetup(${newIndex})`);
+        });
+    }
+}
+
 // Validate kids information
 function validateKidsInfo() {
     const kidSetups = document.querySelectorAll('.kid-setup');
     let valid = true;
+    
+    // Check that at least one kid exists
+    if (kidSetups.length === 0) {
+        alert('Please add at least one child.');
+        return false;
+    }
     
     kidSetups.forEach((setup, index) => {
         const name = setup.querySelector('.kid-name').value.trim();
@@ -315,7 +336,7 @@ function generateGoalsStep() {
 }
 
 // Complete setup and save data
-function completeSetup() {
+async function completeSetup() {
     const kidSetups = document.querySelectorAll('.kid-setup');
     const balanceSetups = document.querySelectorAll('.kid-balances');
     const goalSetups = document.querySelectorAll('.kid-goal');
@@ -360,8 +381,8 @@ function completeSetup() {
     // Initialize settings
     appData.settings.lastAllowanceDate = null;
     appData.settings.rotationWeek = 1;
-    
-    saveData();
+
+    await saveData();
     showMainDashboard();
 }
 
@@ -381,13 +402,11 @@ function showMainDashboard() {
 // Navigation functions
 function showKidsDashboard() {
     currentView = 'kids';
-    
+
     // Update navigation tabs
-    document.getElementById('nav-kids').classList.add('border-blue-500', 'text-blue-600');
-    document.getElementById('nav-kids').classList.remove('border-transparent', 'text-gray-500');
-    document.getElementById('nav-parent').classList.remove('border-blue-500', 'text-blue-600');
-    document.getElementById('nav-parent').classList.add('border-transparent', 'text-gray-500');
-    
+    document.getElementById('nav-kids').classList.add('active');
+    document.getElementById('nav-parent').classList.remove('active');
+
     // Show/hide dashboard views
     document.getElementById('kids-dashboard-view').classList.remove('hidden');
     document.getElementById('parent-dashboard-view').classList.add('hidden');
@@ -396,133 +415,6 @@ function showKidsDashboard() {
     renderNextAllowanceCard();
     renderKidsBalanceCards();
     renderKidsRecentTransactions();
-}
-
-function showParentDashboard() {
-    currentView = 'parent';
-    
-    // Update navigation tabs
-    document.getElementById('nav-parent').classList.add('border-blue-500', 'text-blue-600');
-    document.getElementById('nav-parent').classList.remove('border-transparent', 'text-gray-500');
-    document.getElementById('nav-kids').classList.remove('border-blue-500', 'text-blue-600');
-    document.getElementById('nav-kids').classList.add('border-transparent', 'text-gray-500');
-    
-    // Show/hide dashboard views
-    document.getElementById('parent-dashboard-view').classList.remove('hidden');
-    document.getElementById('kids-dashboard-view').classList.add('hidden');
-    
-    // Render content
-    renderParentControls();
-    renderFamilyManagement();
-    renderFamilySummary();
-    renderGoalsSummary();
-    renderParentRecentTransactions();
-}
-
-// Render kids dashboard cards
-function renderKidsDashboard() {
-    const container = document.getElementById('kids-balance-cards');
-    if (!container) return; // Exit if the element doesn't exist (different view)
-    container.innerHTML = '';
-    
-    appData.kids.forEach(kid => {
-        const age = calculateAge(kid.birthday);
-        const totalBalance = kid.balances.save + kid.balances.spend + kid.balances.share;
-        const weeklyAllowance = age;
-        const nextAllowance = calculateNextAllowanceDistribution(kid);
-        
-        let goalHtml = '';
-        if (kid.goal) {
-            const progress = Math.min((kid.balances.save / kid.goal.target) * 100, 100);
-            const remaining = Math.max(kid.goal.target - kid.balances.save, 0);
-            
-            // Determine progress bar color based on completion percentage
-            let progressColor = '';
-            if (progress < 33) {
-                progressColor = 'from-red-400 to-red-500'; // Red gradient for low progress
-            } else if (progress < 67) {
-                progressColor = 'from-yellow-400 to-orange-500'; // Yellow-orange gradient for medium progress
-            } else if (progress < 100) {
-                progressColor = 'from-green-400 to-green-500'; // Green gradient for high progress
-            } else {
-                progressColor = 'from-emerald-400 to-emerald-600'; // Emerald gradient for completed
-            }
-            
-            goalHtml = `
-                <div class="mt-3 p-4 bg-gradient-to-br from-gray-50 to-gray-100 rounded-lg border border-gray-200">
-                    <div class="flex justify-between items-center mb-2">
-                        <div class="text-sm font-semibold text-gray-800">🎯 ${kid.goal.name}</div>
-                        <div class="text-sm font-bold text-gray-700">${progress.toFixed(0)}%</div>
-                    </div>
-                    
-                    <div class="relative w-full bg-gray-200 rounded-full h-3 mb-3 overflow-hidden shadow-inner">
-                        <div class="absolute top-0 left-0 h-full bg-gradient-to-r ${progressColor} rounded-full transition-all duration-500 ease-out shadow-sm" 
-                             style="width: ${progress}%"></div>
-                        ${progress >= 100 ? '<div class="absolute inset-0 bg-gradient-to-r from-transparent via-white to-transparent opacity-30 animate-pulse"></div>' : ''}
-                    </div>
-                    
-                    <div class="flex justify-between items-center text-xs text-gray-600 mb-2">
-                        <span class="font-medium">$${kid.balances.save.toFixed(2)} saved</span>
-                        <span class="font-medium">$${remaining.toFixed(2)} to go</span>
-                    </div>
-                    
-                    <div class="text-center">
-                        <span class="text-xs text-gray-500">Target: $${kid.goal.target.toFixed(2)}</span>
-                        <button onclick="editGoal(${kid.id})" class="ml-3 text-xs text-blue-500 hover:text-blue-700 font-medium transition-colors duration-200">
-                            ✏️ Edit Goal
-                        </button>
-                    </div>
-                </div>
-            `;
-        } else {
-            goalHtml = `
-                <div class="mt-3 p-3 bg-gradient-to-br from-blue-50 to-indigo-50 rounded-lg border border-blue-200">
-                    <button onclick="setGoal(${kid.id})" class="w-full text-sm text-blue-600 hover:text-blue-800 font-medium transition-colors duration-200">
-                        🎯 + Set Savings Goal
-                    </button>
-                </div>
-            `;
-        }
-        
-        const cardHtml = `
-            <div class="bg-white rounded-lg shadow-lg p-6">
-                <div class="text-center mb-4">
-                    <h3 class="text-xl font-bold text-gray-800">${getKidEmoji(kid.name)} ${kid.name} (${age})</h3>
-                    <p class="text-sm text-gray-600">Weekly: $${weeklyAllowance}.00</p>
-                    <p class="text-sm text-blue-600 font-medium">Next allowance: +$${nextAllowance.save} Save, +$${nextAllowance.spend} Spend, +$${nextAllowance.share} Share</p>
-                </div>
-                
-                <!-- Stats-style bucket display -->
-                <div class="grid grid-cols-3 gap-3 mb-4">
-                    <div class="bg-save/10 border border-save/20 rounded-xl p-4 text-center shadow-sm">
-                        <div class="text-3xl mb-2">💰</div>
-                        <div class="text-sm font-semibold text-save mb-1">SAVE</div>
-                        <div class="text-2xl font-bold text-save">$${kid.balances.save.toFixed(2)}</div>
-                    </div>
-                    
-                    <div class="bg-spend/10 border border-spend/20 rounded-xl p-4 text-center shadow-sm">
-                        <div class="text-3xl mb-2">🛍️</div>
-                        <div class="text-sm font-semibold text-spend mb-1">SPEND</div>
-                        <div class="text-2xl font-bold text-spend">$${kid.balances.spend.toFixed(2)}</div>
-                    </div>
-                    
-                    <div class="bg-share/10 border border-share/20 rounded-xl p-4 text-center shadow-sm">
-                        <div class="text-3xl mb-2">❤️</div>
-                        <div class="text-sm font-semibold text-share mb-1">SHARE</div>
-                        <div class="text-2xl font-bold text-share">$${kid.balances.share.toFixed(2)}</div>
-                    </div>
-                </div>
-                
-                ${goalHtml}
-                
-                <div class="mt-4 pt-4 border-t border-gray-200 text-center">
-                    <span class="text-lg font-bold text-gray-800">📊 Total: $${totalBalance.toFixed(2)}</span>
-                </div>
-            </div>
-        `;
-        
-        container.innerHTML += cardHtml;
-    });
 }
 
 // Calculate age from birthday
@@ -560,7 +452,7 @@ function renderParentControls() {
 }
 
 // Add money to a kid's bucket
-function addMoney() {
+async function addMoney() {
     const kidId = parseInt(document.getElementById('transaction-kid').value);
     const bucket = document.getElementById('transaction-bucket').value;
     const amount = parseFloat(document.getElementById('transaction-amount').value);
@@ -593,23 +485,23 @@ function addMoney() {
     };
     
     appData.transactions.unshift(transaction);
-    
+
     // Clear form
     document.getElementById('transaction-amount').value = '';
     document.getElementById('transaction-description').value = '';
-    
-    saveData();
-    
+
+    await saveData();
+
     // Check for goal completion after adding money
-    checkGoalCompletion(kid);
-    
+    await checkGoalCompletion(kid);
+
     updateDashboardAfterTransaction();
-    
+
     alert(`Added: $${amount.toFixed(2)} to ${kid.name}'s ${bucket} bucket.`);
 }
 
 // Record spending (renamed from recordTransaction for clarity)
-function recordSpending() {
+async function recordSpending() {
     const kidId = parseInt(document.getElementById('transaction-kid').value);
     const bucket = document.getElementById('transaction-bucket').value;
     const amount = parseFloat(document.getElementById('transaction-amount').value);
@@ -647,74 +539,19 @@ function recordSpending() {
     };
     
     appData.transactions.unshift(transaction);
-    
+
     // Clear form
     document.getElementById('transaction-amount').value = '';
     document.getElementById('transaction-description').value = '';
-    
-    saveData();
+
+    await saveData();
     updateDashboardAfterTransaction();
-    
+
     alert(`Recorded: $${amount.toFixed(2)} deducted from ${kid.name}'s ${bucket} bucket.`);
 }
 
-// Add weekly allowance
-function addWeeklyAllowance() {
-    appData.kids.forEach(kid => {
-        const allowanceAmount = kid.age;
-        const baseAmount = Math.floor(allowanceAmount / 3);
-        const remainder = allowanceAmount % 3;
-        
-        // Distribute base amount
-        kid.balances.save += baseAmount;
-        kid.balances.spend += baseAmount;
-        kid.balances.share += baseAmount;
-        
-        // Distribute remainder based on rotation
-        if (remainder > 0) {
-            const buckets = ['save', 'spend', 'share'];
-            const rotationIndex = (appData.settings.rotationWeek - 1) % 3;
-            
-            for (let i = 0; i < remainder; i++) {
-                const bucketIndex = (rotationIndex + i) % 3;
-                kid.balances[buckets[bucketIndex]] += 1;
-            }
-        }
-        
-        // Add transaction record
-        const transaction = {
-            id: Date.now() + kid.id,
-            date: new Date().toISOString(),
-            kidId: kid.id,
-            kidName: kid.name,
-            bucket: 'all',
-            amount: allowanceAmount,
-            description: 'Weekly allowance',
-            type: 'allowance'
-        };
-        
-        appData.transactions.unshift(transaction);
-    });
-    
-    // Update rotation week
-    appData.settings.rotationWeek = (appData.settings.rotationWeek % 3) + 1;
-    appData.settings.lastAllowanceDate = new Date().toISOString();
-    
-    saveData();
-    
-    // Check for goal completions after adding allowance
-    appData.kids.forEach(kid => {
-        checkGoalCompletion(kid);
-    });
-    
-    updateDashboardAfterTransaction();
-    renderNextAllowanceCard(); // Update the next allowance card
-    
-    alert('Weekly allowance added for all kids!');
-}
-
 // Check and automatically add weekly allowance
-function checkAndAddWeeklyAllowance() {
+async function checkAndAddWeeklyAllowance() {
     if (!appData.settings.lastAllowanceDate) {
         return; // First time setup, don't auto-add
     }
@@ -738,7 +575,7 @@ function checkAndAddWeeklyAllowance() {
     // Check if it's been at least a week AND it's the right day
     if (daysSince >= 7 && currentDayOfWeek === targetDayOfWeek) {
         console.log(`Adding weekly allowance on ${allowanceDay} (${daysSince} days since last)`);
-        addWeeklyAllowance();
+        await addWeeklyAllowance();
     } else if (daysSince >= 7) {
         console.log(`Allowance due but waiting for ${allowanceDay} (today is ${['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][currentDayOfWeek]})`);
     }
@@ -753,51 +590,6 @@ function setGoal(kidId) {
 function editGoal(kidId) {
     openGoalManagement(kidId);
 }
-
-// Render recent transactions
-function renderRecentTransactions() {
-    const container = document.getElementById('recent-transactions');
-    const recentTransactions = appData.transactions.slice(0, 10);
-    
-    if (recentTransactions.length === 0) {
-        container.innerHTML = '<p class="text-gray-500 text-center py-4">No transactions yet.</p>';
-        return;
-    }
-    
-    container.innerHTML = '';
-    
-    recentTransactions.forEach(transaction => {
-        const date = new Date(transaction.date).toLocaleDateString();
-        const bucketEmoji = transaction.bucket === 'save' ? '💰' : 
-                           transaction.bucket === 'spend' ? '🛍️' : 
-                           transaction.bucket === 'share' ? '❤️' : '📅';
-        
-        const transactionHtml = `
-            <div class="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
-                <div class="flex items-center space-x-3">
-                    <span class="text-lg">${bucketEmoji}</span>
-                    <div>
-                        <div class="font-medium text-gray-800">
-                            ${transaction.kidName} - ${transaction.type === 'allowance' ? 'Allowance' : transaction.bucket.charAt(0).toUpperCase() + transaction.bucket.slice(1)}
-                        </div>
-                        <div class="text-sm text-gray-600">${transaction.description}</div>
-                    </div>
-                </div>
-                <div class="text-right">
-                    <div class="font-bold ${transaction.type === 'allowance' ? 'text-green-600' : 'text-red-600'}">
-                        ${transaction.type === 'allowance' ? '+' : '-'}$${transaction.amount.toFixed(2)}
-                    </div>
-                    <div class="text-xs text-gray-500">${date}</div>
-                </div>
-            </div>
-        `;
-        
-        container.innerHTML += transactionHtml;
-    });
-}
-
-// Show transaction history modal (implemented above)
-// This function is now implemented in the "Show transaction history modal" section
 
 // Backup data
 function backupData() {
@@ -814,16 +606,16 @@ function backupData() {
 }
 
 // Check for goal completion
-function checkGoalCompletion(kid) {
+async function checkGoalCompletion(kid) {
     if (kid.goal && kid.balances.save >= kid.goal.target) {
-        showGoalCelebration(kid);
+        await showGoalCelebration(kid);
         return true;
     }
     return false;
 }
 
 // Show goal completion celebration
-function showGoalCelebration(kid) {
+async function showGoalCelebration(kid) {
     const modal = document.getElementById('goal-celebration-modal');
     const message = document.getElementById('goal-celebration-message');
     
@@ -845,7 +637,7 @@ function showGoalCelebration(kid) {
     };
     
     appData.transactions.unshift(transaction);
-    saveData();
+    await saveData();
 }
 
 // Set new goal after completion
@@ -866,7 +658,7 @@ function closeGoalCelebration() {
 }
 
 // Check birthdays and update ages
-function checkBirthdays() {
+async function checkBirthdays() {
     const today = new Date();
     let birthdayUpdates = false;
     
@@ -899,10 +691,10 @@ function checkBirthdays() {
     });
     
     if (birthdayUpdates) {
-        saveData();
-        if (document.getElementById('main-dashboard').classList.contains('hidden') === false) {
-            renderKidsDashboard();
-            renderRecentTransactions();
+        await saveData();
+        const dashboardVisible = !document.getElementById('main-navigation').classList.contains('hidden');
+        if (dashboardVisible) {
+            updateDashboardAfterTransaction();
         }
     }
 }
@@ -936,7 +728,7 @@ function closeGoalManagement() {
 }
 
 // Save goal from modal
-function saveGoal() {
+async function saveGoal() {
     if (!currentGoalKidId) return;
     
     const kid = appData.kids.find(k => k.id === currentGoalKidId);
@@ -955,21 +747,21 @@ function saveGoal() {
         target: goalTarget
     };
 
-    saveData();
+    await saveData();
     renderKidsBalanceCards();
     closeGoalManagement();
 }
 
 // Remove goal
-function removeGoal() {
+async function removeGoal() {
     if (!currentGoalKidId) return;
-    
+
     const kid = appData.kids.find(k => k.id === currentGoalKidId);
     if (!kid) return;
-    
+
     if (confirm(`Are you sure you want to remove ${kid.name}'s savings goal?`)) {
         delete kid.goal;
-        saveData();
+        await saveData();
         renderKidsBalanceCards();
         closeGoalManagement();
     }
@@ -1318,40 +1110,40 @@ function closeCatchupReview() {
 }
 
 // Add all missed allowances automatically
-function addAllMissedAllowances() {
+async function addAllMissedAllowances() {
     if (!missedWeeksData) return;
-    
+
     const weeksToAdd = missedWeeksData.missedWeeks;
-    addMissedAllowancesForWeeks(weeksToAdd);
-    
+    await addMissedAllowancesForWeeks(weeksToAdd);
+
     dismissCatchupAlert();
     alert(`Added ${weeksToAdd} week${weeksToAdd > 1 ? 's' : ''} of allowances for all kids!`);
 }
 
 // Add selected allowances from review modal
-function addSelectedAllowances() {
+async function addSelectedAllowances() {
     if (!missedWeeksData) return;
-    
+
     let totalAdded = 0;
     appData.kids.forEach(kid => {
         const weeksSelect = document.getElementById(`catchup-weeks-${kid.id}`);
         const weeksToAdd = parseInt(weeksSelect.value);
-        
+
         if (weeksToAdd > 0) {
             addMissedAllowancesForKid(kid, weeksToAdd);
             totalAdded += weeksToAdd;
         }
     });
-    
+
     // Update last allowance date
     appData.settings.lastAllowanceDate = new Date().toISOString();
-    saveData();
-    
+    await saveData();
+
     // Check for goal completions
-    appData.kids.forEach(kid => {
-        checkGoalCompletion(kid);
-    });
-    
+    for (const kid of appData.kids) {
+        await checkGoalCompletion(kid);
+    }
+
     // Refresh current view
     if (currentView === 'kids') {
         renderKidsBalanceCards();
@@ -1360,77 +1152,65 @@ function addSelectedAllowances() {
         renderFamilySummary();
         renderParentRecentTransactions();
     }
-    
+
     closeCatchupReview();
     dismissCatchupAlert();
-    
+
     if (totalAdded > 0) {
         alert(`Added selected allowances successfully!`);
     }
 }
 
-// Add missed allowances for a specific kid
+// Add missed allowances for a specific kid. Pure in-memory mutation --
+// callers are responsible for saveData() once all kids are processed.
 function addMissedAllowancesForKid(kid, weeksToAdd) {
     const processingDate = new Date(); // Actual date when catch-up is processed
-    
+    const age = allowanceLogic.calculateAge(kid.birthday);
+
     for (let week = 0; week < weeksToAdd; week++) {
-        const allowanceAmount = kid.age;
-        const baseAmount = Math.floor(allowanceAmount / 3);
-        const remainder = allowanceAmount % 3;
-        
-        // Distribute base amount
-        kid.balances.save += baseAmount;
-        kid.balances.spend += baseAmount;
-        kid.balances.share += baseAmount;
-        
-        // Distribute remainder based on rotation
-        if (remainder > 0) {
-            const buckets = ['save', 'spend', 'share'];
-            const rotationIndex = (appData.settings.rotationWeek - 1 + week) % 3;
-            
-            for (let i = 0; i < remainder; i++) {
-                const bucketIndex = (rotationIndex + i) % 3;
-                kid.balances[buckets[bucketIndex]] += 1;
-            }
-        }
-        
+        const distribution = allowanceLogic.distributeAllowance(age, appData.settings.rotationWeek + week);
+
+        kid.balances.save += distribution.save;
+        kid.balances.spend += distribution.spend;
+        kid.balances.share += distribution.share;
+
         // Get the specific week information for description
         const specificWeek = missedWeeksData.specificWeeks[week];
         const weekRange = specificWeek ? specificWeek.dateRange : getWeekDateRange(new Date(missedWeeksData.lastDate.getTime() + (week + 1) * 7 * 24 * 60 * 60 * 1000));
-        
+
         const transaction = {
             id: Date.now() + kid.id + week,
             date: processingDate.toISOString(), // Use actual processing date
             kidId: kid.id,
             kidName: kid.name,
             bucket: 'all',
-            amount: allowanceAmount,
+            amount: age,
             description: `Weekly allowance for ${weekRange} (catch-up)`, // Clear catch-up indicator
             type: 'allowance'
         };
-        
+
         appData.transactions.unshift(transaction);
     }
-    
+
     // Update rotation week
     appData.settings.rotationWeek = ((appData.settings.rotationWeek - 1 + weeksToAdd) % 3) + 1;
 }
 
 // Add missed allowances for all kids for specified weeks
-function addMissedAllowancesForWeeks(weeksToAdd) {
+async function addMissedAllowancesForWeeks(weeksToAdd) {
     appData.kids.forEach(kid => {
         addMissedAllowancesForKid(kid, weeksToAdd);
     });
-    
+
     // Update last allowance date
     appData.settings.lastAllowanceDate = new Date().toISOString();
-    saveData();
-    
+    await saveData();
+
     // Check for goal completions
-    appData.kids.forEach(kid => {
-        checkGoalCompletion(kid);
-    });
-    
+    for (const kid of appData.kids) {
+        await checkGoalCompletion(kid);
+    }
+
     // Refresh current view
     if (currentView === 'kids') {
         renderKidsBalanceCards();
@@ -1474,175 +1254,140 @@ function getNextSunday() {
 
 // Calculate next allowance distribution for a kid
 function calculateNextAllowanceDistribution(kid) {
-    const allowanceAmount = calculateAge(kid.birthday);
-    const baseAmount = Math.floor(allowanceAmount / 3);
-    const remainder = allowanceAmount % 3;
-    
-    let distribution = {
-        save: baseAmount,
-        spend: baseAmount,
-        share: baseAmount
-    };
-    
-    // Add remainder based on current rotation
-    if (remainder > 0) {
-        const buckets = ['save', 'spend', 'share'];
-        const rotationIndex = (appData.settings.rotationWeek - 1) % 3;
-        
-        for (let i = 0; i < remainder; i++) {
-            const bucketIndex = (rotationIndex + i) % 3;
-            distribution[buckets[bucketIndex]] += 1;
-        }
-    }
-    
-    return distribution;
+    const age = allowanceLogic.calculateAge(kid.birthday);
+    return allowanceLogic.distributeAllowance(age, appData.settings.rotationWeek);
 }
 
 // Render kids balance cards (updated for new container)
+// Small inline-icon glyphs for each bucket, used instead of emoji.
+const BUCKET_ICONS = {
+    save: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 10c0-1 3-3 8-3s8 2 8 3v6c0 1-3 3-8 3s-8-2-8-3z"/><path d="M4 10c0 1 3 3 8 3s8-2 8-3"/></svg>',
+    spend: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 7h11l2 12H4z"/><path d="M9 7a3 3 0 0 1 6 0"/></svg>',
+    share: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20s-7-4.4-9.3-8.8C1.2 8 2.7 5 6 5c2 0 3.3 1 4 2.2C10.7 6 12 5 14 5c3.3 0 4.8 3 3.3 6.2C15 15.6 12 20 12 20z"/></svg>'
+};
+
+function bucketRowHtml(bucket, label, amount) {
+    return `
+        <div class="bucket-row">
+            <span class="bucket-icon ${bucket}-tone">${BUCKET_ICONS[bucket]}</span>
+            <span class="bucket-label ${bucket}-tone">${label}</span>
+            <span class="bucket-amount">$${amount.toFixed(2)}</span>
+        </div>
+    `;
+}
+
 function renderKidsBalanceCards() {
     const container = document.getElementById('kids-balance-cards');
     if (!container) return; // Exit if the element doesn't exist (different view)
     container.innerHTML = '';
-    
+
     appData.kids.forEach(kid => {
         const totalBalance = kid.balances.save + kid.balances.spend + kid.balances.share;
-        const weeklyAllowance = kid.age;
+        const initial = kid.name.charAt(0).toUpperCase();
         const nextAllowance = calculateNextAllowanceDistribution(kid);
-        
+
         let goalHtml = '';
         if (kid.goal) {
             const progress = Math.min((kid.balances.save / kid.goal.target) * 100, 100);
             const remaining = Math.max(kid.goal.target - kid.balances.save, 0);
-            
-            // Determine progress bar color based on completion percentage
-            let progressColor = '';
-            if (progress < 33) {
-                progressColor = 'from-red-400 to-red-500'; // Red gradient for low progress
-            } else if (progress < 67) {
-                progressColor = 'from-yellow-400 to-orange-500'; // Yellow-orange gradient for medium progress
-            } else if (progress < 100) {
-                progressColor = 'from-green-400 to-green-500'; // Green gradient for high progress
-            } else {
-                progressColor = 'from-emerald-400 to-emerald-600'; // Emerald gradient for completed
-            }
-            
+
             goalHtml = `
-                <div class="mt-3 p-4 bg-gradient-to-br from-gray-50 to-gray-100 rounded-lg border border-gray-200">
-                    <div class="flex justify-between items-center mb-2">
-                        <div class="text-sm font-semibold text-gray-800">🎯 ${kid.goal.name}</div>
-                        <div class="text-sm font-bold text-gray-700">${progress.toFixed(0)}%</div>
+                <div class="goal">
+                    <div class="goal-row">
+                        <button onclick="editGoal(${kid.id})" class="goal-name-link goal-name">${kid.goal.name}</button>
+                        <span class="goal-pct">${progress.toFixed(0)}%</span>
                     </div>
-                    
-                    <div class="relative w-full bg-gray-200 rounded-full h-3 mb-3 overflow-hidden shadow-inner">
-                        <div class="absolute top-0 left-0 h-full bg-gradient-to-r ${progressColor} rounded-full transition-all duration-500 ease-out shadow-sm" 
-                             style="width: ${progress}%"></div>
-                        ${progress >= 100 ? '<div class="absolute inset-0 bg-gradient-to-r from-transparent via-white to-transparent opacity-30 animate-pulse"></div>' : ''}
-                    </div>
-                    
-                    <div class="flex justify-between items-center text-xs text-gray-600 mb-2">
-                        <span class="font-medium">$${kid.balances.save.toFixed(2)} saved</span>
-                        <span class="font-medium">$${remaining.toFixed(2)} to go</span>
-                    </div>
-                    
-                    <div class="text-center">
-                        <span class="text-xs text-gray-500">Target: $${kid.goal.target.toFixed(2)}</span>
-                        <button onclick="editGoal(${kid.id})" class="ml-3 text-xs text-blue-500 hover:text-blue-700 font-medium transition-colors duration-200">
-                            ✏️ Edit Goal
-                        </button>
+                    <div class="goal-track"><div class="goal-fill" style="width: ${progress}%;"></div></div>
+                    <div class="goal-caption">
+                        <span>$${kid.balances.save.toFixed(2)} saved</span>
+                        <span>$${remaining.toFixed(2)} to go</span>
                     </div>
                 </div>
             `;
         } else {
             goalHtml = `
-                <div class="mt-3 p-3 bg-gradient-to-br from-blue-50 to-indigo-50 rounded-lg border border-blue-200">
-                    <button onclick="setGoal(${kid.id})" class="w-full text-sm text-blue-600 hover:text-blue-800 font-medium transition-colors duration-200">
-                        🎯 + Set Savings Goal
-                    </button>
+                <div class="goal-cta">
+                    <button onclick="setGoal(${kid.id})" class="btn btn-outline">+ Set a Savings Goal</button>
                 </div>
             `;
         }
-        
+
         const cardHtml = `
-            <div class="bg-white rounded-lg shadow-lg p-6">
-                <div class="text-center mb-4">
-                    <h3 class="text-xl font-bold text-gray-800">${getKidEmoji(kid.name)} ${kid.name} (${kid.age})</h3>
-                    <p class="text-sm text-gray-600">Weekly: $${weeklyAllowance}.00</p>
-                    <p class="text-sm text-blue-600 font-medium">Next allowance: +$${nextAllowance.save} Save, +$${nextAllowance.spend} Spend, +$${nextAllowance.share} Share</p>
-                </div>
-                
-                <!-- Stats-style bucket display -->
-                <div class="grid grid-cols-3 gap-3 mb-4">
-                    <div class="bg-save/10 border border-save/20 rounded-xl p-4 text-center shadow-sm">
-                        <div class="text-3xl mb-2">💰</div>
-                        <div class="text-sm font-semibold text-save mb-1">SAVE</div>
-                        <div class="text-2xl font-bold text-save">$${kid.balances.save.toFixed(2)}</div>
-                    </div>
-                    
-                    <div class="bg-spend/10 border border-spend/20 rounded-xl p-4 text-center shadow-sm">
-                        <div class="text-3xl mb-2">🛍️</div>
-                        <div class="text-sm font-semibold text-spend mb-1">SPEND</div>
-                        <div class="text-2xl font-bold text-spend">$${kid.balances.spend.toFixed(2)}</div>
-                    </div>
-                    
-                    <div class="bg-share/10 border border-share/20 rounded-xl p-4 text-center shadow-sm">
-                        <div class="text-3xl mb-2">❤️</div>
-                        <div class="text-sm font-semibold text-share mb-1">SHARE</div>
-                        <div class="text-2xl font-bold text-share">$${kid.balances.share.toFixed(2)}</div>
+            <div class="card kid-card">
+                <div class="kid-head">
+                    <div class="kid-stamp">${initial}</div>
+                    <div>
+                        <p class="kid-name">${kid.name}</p>
+                        <div class="kid-meta">Age ${kid.age} &middot; $${kid.age}.00 / week</div>
+                        <div class="kid-meta">Next: +$${nextAllowance.save} Save, +$${nextAllowance.spend} Spend, +$${nextAllowance.share} Share</div>
                     </div>
                 </div>
-                
+                <div class="buckets">
+                    ${bucketRowHtml('save', 'Save', kid.balances.save)}
+                    ${bucketRowHtml('spend', 'Spend', kid.balances.spend)}
+                    ${bucketRowHtml('share', 'Share', kid.balances.share)}
+                </div>
+                <div class="kid-total"><span>Total</span><span class="amt">$${totalBalance.toFixed(2)}</span></div>
                 ${goalHtml}
-                
-                <div class="mt-4 pt-4 border-t border-gray-200 text-center">
-                    <span class="text-lg font-bold text-gray-800">📊 Total: $${totalBalance.toFixed(2)}</span>
-                </div>
             </div>
         `;
-        
+
         container.innerHTML += cardHtml;
     });
 }
 
 // Render kids recent transactions
+// Shared "ticket stub" row for a single transaction, used by both the kids
+// and parent activity lists.
+function activityStubHtml(transaction, { showTime = false } = {}) {
+    const dateObj = new Date(transaction.date);
+    const [monthLabel, dayLabel] = dateObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }).split(' ');
+
+    let tone = '';
+    let amountPrefix = '';
+    if (transaction.type === 'deduction') {
+        tone = 'spend-tone';
+        amountPrefix = '−';
+    } else if (transaction.amount > 0) {
+        tone = 'save-tone';
+        amountPrefix = '+';
+    }
+
+    const typeLabels = {
+        allowance: 'Allowance',
+        goal_completed: 'Goal completed',
+        birthday: 'Birthday',
+        profile_update: 'Update',
+        undo_allowance: 'Undo'
+    };
+    const label = typeLabels[transaction.type]
+        || (transaction.bucket && transaction.bucket !== 'all' ? transaction.bucket.charAt(0).toUpperCase() + transaction.bucket.slice(1) : '');
+
+    const timeStr = showTime ? ` &middot; ${dateObj.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : '';
+    const amountHtml = transaction.amount > 0 ? `${amountPrefix}$${transaction.amount.toFixed(2)}` : '&mdash;';
+
+    return `
+        <div class="stub">
+            <div class="stub-date">${monthLabel.toUpperCase()}<br>${dayLabel || ''}</div>
+            <div class="stub-desc">
+                <span class="who">${transaction.kidName}</span> &mdash; ${label}
+                <div class="stub-sub">${transaction.description}${timeStr}</div>
+            </div>
+            <div class="stub-amt ${tone}">${amountHtml}</div>
+        </div>
+    `;
+}
+
 function renderKidsRecentTransactions() {
     const container = document.getElementById('kids-recent-transactions');
     const recentTransactions = appData.transactions.slice(0, 5); // Show fewer for kids view
-    
+
     if (recentTransactions.length === 0) {
-        container.innerHTML = '<p class="text-gray-500 text-center py-4">No activity yet.</p>';
+        container.innerHTML = '<p class="empty-note">No activity yet.</p>';
         return;
     }
-    
-    container.innerHTML = '';
-    
-    recentTransactions.forEach(transaction => {
-        const date = new Date(transaction.date).toLocaleDateString();
-        const bucketEmoji = transaction.bucket === 'save' ? '💰' : 
-                           transaction.bucket === 'spend' ? '🛍️' : 
-                           transaction.bucket === 'share' ? '❤️' : '📅';
-        
-        const transactionHtml = `
-            <div class="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
-                <div class="flex items-center space-x-3">
-                    <span class="text-lg">${bucketEmoji}</span>
-                    <div>
-                        <div class="font-medium text-gray-800">
-                            ${transaction.kidName} - ${transaction.type === 'allowance' ? 'Allowance' : transaction.bucket.charAt(0).toUpperCase() + transaction.bucket.slice(1)}
-                        </div>
-                        <div class="text-sm text-gray-600">${transaction.description}</div>
-                    </div>
-                </div>
-                <div class="text-right">
-                    <div class="font-bold ${transaction.type === 'allowance' ? 'text-green-600' : 'text-red-600'}">
-                        ${transaction.type === 'allowance' ? '+' : '-'}$${transaction.amount.toFixed(2)}
-                    </div>
-                    <div class="text-xs text-gray-500">${date}</div>
-                </div>
-            </div>
-        `;
-        
-        container.innerHTML += transactionHtml;
-    });
+
+    container.innerHTML = recentTransactions.map(t => activityStubHtml(t)).join('');
 }
 
 // Render family summary for parent dashboard
@@ -1656,126 +1401,56 @@ function renderFamilySummary() {
     const totalWeeklyAllowance = appData.kids.reduce((sum, kid) => sum + kid.age, 0);
     
     container.innerHTML = `
-        <div class="flex justify-between items-center">
-            <span class="text-gray-600">Total Family Balance:</span>
-            <span class="font-bold text-lg">$${totalBalance.toFixed(2)}</span>
-        </div>
-        <div class="flex justify-between items-center">
-            <span class="text-save">💰 Total Savings:</span>
-            <span class="font-semibold text-save">$${totalSave.toFixed(2)}</span>
-        </div>
-        <div class="flex justify-between items-center">
-            <span class="text-spend">🛍️ Total Spending:</span>
-            <span class="font-semibold text-spend">$${totalSpend.toFixed(2)}</span>
-        </div>
-        <div class="flex justify-between items-center">
-            <span class="text-share">❤️ Total Sharing:</span>
-            <span class="font-semibold text-share">$${totalShare.toFixed(2)}</span>
-        </div>
-        <div class="flex justify-between items-center pt-2 border-t border-gray-200">
-            <span class="text-gray-600">Weekly Allowance:</span>
-            <span class="font-semibold">$${totalWeeklyAllowance.toFixed(2)}</span>
-        </div>
+        <div class="info-row"><span>Total Family Balance</span><span class="val">$${totalBalance.toFixed(2)}</span></div>
+        <div class="info-row save-tone"><span>Total Savings</span><span class="val">$${totalSave.toFixed(2)}</span></div>
+        <div class="info-row spend-tone"><span>Total Spending</span><span class="val">$${totalSpend.toFixed(2)}</span></div>
+        <div class="info-row share-tone"><span>Total Sharing</span><span class="val">$${totalShare.toFixed(2)}</span></div>
+        <div class="info-row"><span>Weekly Allowance</span><span class="val">$${totalWeeklyAllowance.toFixed(2)}</span></div>
     `;
 }
 
 // Render goals summary for parent dashboard
 function renderGoalsSummary() {
     const container = document.getElementById('goals-summary');
-    
+
     const kidsWithGoals = appData.kids.filter(kid => kid.goal);
-    
+
     if (kidsWithGoals.length === 0) {
-        container.innerHTML = '<p class="text-gray-500 text-center py-4">No active savings goals.</p>';
+        container.innerHTML = '<p class="empty-note">No active savings goals.</p>';
         return;
     }
-    
-    container.innerHTML = '';
-    
-    kidsWithGoals.forEach(kid => {
+
+    container.innerHTML = kidsWithGoals.map(kid => {
         const progress = Math.min((kid.balances.save / kid.goal.target) * 100, 100);
         const remaining = Math.max(kid.goal.target - kid.balances.save, 0);
-        
-        const goalHtml = `
-            <div class="p-3 border border-gray-200 rounded-lg">
-                <div class="flex justify-between items-center mb-2">
-                    <span class="font-medium">${getKidEmoji(kid.name)} ${kid.name}</span>
-                    <span class="text-sm text-gray-600">${progress.toFixed(0)}%</span>
+
+        return `
+            <div class="goal">
+                <div class="goal-row">
+                    <span class="goal-name">${kid.name} &mdash; ${kid.goal.name}</span>
+                    <span class="goal-pct">${progress.toFixed(0)}%</span>
                 </div>
-                <div class="text-sm text-gray-700 mb-1">${kid.goal.name}</div>
-                <div class="w-full bg-gray-200 rounded-full h-2 mb-2">
-                    <div class="bg-save h-2 rounded-full" style="width: ${progress}%"></div>
-                </div>
-                <div class="flex justify-between text-xs text-gray-600">
+                <div class="goal-track"><div class="goal-fill" style="width: ${progress}%;"></div></div>
+                <div class="goal-caption">
                     <span>$${kid.balances.save.toFixed(2)} saved</span>
                     <span>$${remaining.toFixed(2)} to go</span>
                 </div>
             </div>
         `;
-        
-        container.innerHTML += goalHtml;
-    });
+    }).join('');
 }
 
 // Render parent recent transactions (show more)
 function renderParentRecentTransactions() {
     const container = document.getElementById('parent-recent-transactions');
     const recentTransactions = appData.transactions.slice(0, 20); // Show more for parent view
-    
+
     if (recentTransactions.length === 0) {
-        container.innerHTML = '<p class="text-gray-500 text-center py-4">No transactions yet.</p>';
+        container.innerHTML = '<p class="empty-note">No transactions yet.</p>';
         return;
     }
-    
-    container.innerHTML = '';
-    
-    recentTransactions.forEach(transaction => {
-        const date = new Date(transaction.date).toLocaleDateString();
-        const time = new Date(transaction.date).toLocaleTimeString();
-        const bucketEmoji = transaction.bucket === 'save' ? '💰' : 
-                           transaction.bucket === 'spend' ? '🛍️' : 
-                           transaction.bucket === 'share' ? '❤️' : '📅';
-        
-        let typeColor = 'text-gray-600';
-        let amountPrefix = '';
-        
-        if (transaction.type === 'allowance') {
-            typeColor = 'text-green-600';
-            amountPrefix = '+';
-        } else if (transaction.type === 'deduction') {
-            typeColor = 'text-red-600';
-            amountPrefix = '-';
-        } else if (transaction.type === 'goal_completed') {
-            typeColor = 'text-purple-600';
-            amountPrefix = '🎯';
-        } else if (transaction.type === 'birthday') {
-            typeColor = 'text-blue-600';
-            amountPrefix = '🎂';
-        }
-        
-        const transactionHtml = `
-            <div class="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
-                <div class="flex items-center space-x-3">
-                    <span class="text-lg">${bucketEmoji}</span>
-                    <div>
-                        <div class="font-medium text-gray-800">
-                            ${transaction.kidName} - ${transaction.type === 'allowance' ? 'Allowance' : transaction.bucket.charAt(0).toUpperCase() + transaction.bucket.slice(1)}
-                        </div>
-                        <div class="text-sm text-gray-600">${transaction.description}</div>
-                        <div class="text-xs text-gray-500">${date} at ${time}</div>
-                    </div>
-                </div>
-                <div class="text-right">
-                    <div class="font-bold ${typeColor}">
-                        ${amountPrefix}${transaction.amount > 0 ? '$' + transaction.amount.toFixed(2) : ''}
-                    </div>
-                    <div class="text-xs text-gray-500 capitalize">${transaction.type.replace('_', ' ')}</div>
-                </div>
-            </div>
-        `;
-        
-        container.innerHTML += transactionHtml;
-    });
+
+    container.innerHTML = recentTransactions.map(t => activityStubHtml(t, { showTime: true })).join('');
 }
 
 // Update existing functions to work with new dashboard structure
@@ -1795,42 +1470,187 @@ function renderFamilyManagement() {
     const container = document.getElementById('family-management-cards');
     container.innerHTML = '';
     
-    appData.kids.forEach(kid => {
+    container.innerHTML = appData.kids.map(kid => {
         const totalBalance = kid.balances.save + kid.balances.spend + kid.balances.share;
         const birthday = new Date(kid.birthday).toLocaleDateString();
-        
-        const cardHtml = `
-            <div class="p-4 border border-gray-200 rounded-lg bg-gradient-to-br from-white to-gray-50">
-                <div class="flex items-center justify-between mb-3">
-                    <h4 class="font-semibold text-gray-800">${getKidEmoji(kid.name)} ${kid.name}</h4>
-                    <button onclick="editKidProfile(${kid.id})" class="text-blue-500 hover:text-blue-700 text-sm font-medium transition-colors duration-200">
-                        ✏️ Edit Profile
-                    </button>
-                </div>
-                
-                <div class="space-y-2 text-sm text-gray-600">
-                    <div class="flex justify-between">
-                        <span>Age:</span>
-                        <span class="font-medium">${kid.age} years old</span>
-                    </div>
-                    <div class="flex justify-between">
-                        <span>Birthday:</span>
-                        <span class="font-medium">${birthday}</span>
-                    </div>
-                    <div class="flex justify-between">
-                        <span>Weekly Allowance:</span>
-                        <span class="font-medium text-green-600">$${kid.age}.00</span>
-                    </div>
-                    <div class="flex justify-between">
-                        <span>Total Balance:</span>
-                        <span class="font-medium text-blue-600">$${totalBalance.toFixed(2)}</span>
+
+        return `
+            <div class="kid-manage-card">
+                <div class="kid-manage-head">
+                    <p class="kid-name">${kid.name}</p>
+                    <div class="kid-manage-actions">
+                        <button onclick="editKidProfile(${kid.id})" class="link-btn">Edit</button>
+                        <button onclick="removeKid(${kid.id})" class="link-btn danger" title="Remove this child">Remove</button>
                     </div>
                 </div>
+                <div class="info-row"><span>Age</span><span class="val">${kid.age} years old</span></div>
+                <div class="info-row"><span>Birthday</span><span class="val">${birthday}</span></div>
+                <div class="info-row save-tone"><span>Weekly Allowance</span><span class="val">$${kid.age}.00</span></div>
+                <div class="info-row"><span>Total Balance</span><span class="val">$${totalBalance.toFixed(2)}</span></div>
             </div>
         `;
-        
-        container.innerHTML += cardHtml;
+    }).join('');
+}
+
+// Open Add Kid Modal
+function openAddKidModal() {
+    const modal = document.getElementById('add-kid-modal');
+    const nameInput = document.getElementById('add-kid-name');
+    const birthdayInput = document.getElementById('add-kid-birthday');
+    const saveInput = document.getElementById('add-kid-save');
+    const spendInput = document.getElementById('add-kid-spend');
+    const shareInput = document.getElementById('add-kid-share');
+    const allowancePreview = document.getElementById('add-kid-allowance-preview');
+    
+    // Clear inputs
+    nameInput.value = '';
+    birthdayInput.value = '';
+    saveInput.value = '0';
+    spendInput.value = '0';
+    shareInput.value = '0';
+    allowancePreview.textContent = '$0.00';
+    
+    // Add event listener to update allowance preview when birthday changes
+    birthdayInput.addEventListener('change', function() {
+        if (this.value) {
+            const age = calculateAge(this.value);
+            allowancePreview.textContent = `$${age}.00`;
+        } else {
+            allowancePreview.textContent = '$0.00';
+        }
     });
+    
+    modal.classList.remove('hidden');
+}
+
+// Close Add Kid Modal
+function closeAddKidModal() {
+    document.getElementById('add-kid-modal').classList.add('hidden');
+}
+
+// Save new kid from modal
+async function saveNewKid() {
+    const name = document.getElementById('add-kid-name').value.trim();
+    const birthday = document.getElementById('add-kid-birthday').value;
+    const saveBalance = parseFloat(document.getElementById('add-kid-save').value) || 0;
+    const spendBalance = parseFloat(document.getElementById('add-kid-spend').value) || 0;
+    const shareBalance = parseFloat(document.getElementById('add-kid-share').value) || 0;
+    
+    if (!name || !birthday) {
+        alert('Please enter a name and birthday for the child.');
+        return;
+    }
+    
+    const age = calculateAge(birthday);
+    
+    // Create new kid object
+    const newKid = {
+        id: Date.now(),
+        name: name,
+        birthday: birthday,
+        age: age,
+        balances: {
+            save: saveBalance,
+            spend: spendBalance,
+            share: shareBalance
+        }
+    };
+    
+    // Add to appData
+    appData.kids.push(newKid);
+    
+    // Add transaction record for the new kid
+    const transaction = {
+        id: Date.now(),
+        date: new Date().toISOString(),
+        kidId: newKid.id,
+        kidName: name,
+        bucket: 'all',
+        amount: saveBalance + spendBalance + shareBalance,
+        description: `New child added: ${name} (Age ${age}) with starting balance of $${(saveBalance + spendBalance + shareBalance).toFixed(2)}`,
+        type: 'profile_update'
+    };
+    
+    appData.transactions.unshift(transaction);
+
+    await saveData();
+
+    // Update all dashboard views
+    renderFamilyManagement();
+    renderParentControls(); // Update dropdown options
+    renderFamilySummary();
+    renderGoalsSummary();
+    renderParentRecentTransactions();
+
+    // If currently on kids view, update that too
+    if (currentView === 'kids') {
+        renderKidsBalanceCards();
+        renderKidsRecentTransactions();
+        renderNextAllowanceCard();
+    }
+
+    closeAddKidModal();
+
+    alert(`${name} has been added to your family!`);
+}
+
+// Remove a kid from the family
+async function removeKid(kidId) {
+    // Prevent removing the last kid
+    if (appData.kids.length <= 1) {
+        alert('You must have at least one child in the app.');
+        return;
+    }
+    
+    const kid = appData.kids.find(k => k.id === kidId);
+    if (!kid) return;
+    
+    const totalBalance = kid.balances.save + kid.balances.spend + kid.balances.share;
+    
+    let confirmMessage = `Are you sure you want to remove ${kid.name} from your family?`;
+    if (totalBalance > 0) {
+        confirmMessage += `\n\n⚠️ Warning: ${kid.name} has a balance of $${totalBalance.toFixed(2)} that will be deleted.`;
+    }
+    confirmMessage += `\n\nThis action cannot be undone.`;
+    
+    if (!confirm(confirmMessage)) {
+        return;
+    }
+    
+    // Remove kid from appData
+    appData.kids = appData.kids.filter(k => k.id !== kidId);
+    
+    // Add transaction record for the removal
+    const transaction = {
+        id: Date.now(),
+        date: new Date().toISOString(),
+        kidId: 0, // Special ID for system transactions
+        kidName: 'System',
+        bucket: 'all',
+        amount: 0,
+        description: `Child removed: ${kid.name} (Balance $${totalBalance.toFixed(2)} deleted)`,
+        type: 'profile_update'
+    };
+    
+    appData.transactions.unshift(transaction);
+
+    await saveData();
+
+    // Update all dashboard views
+    renderFamilyManagement();
+    renderParentControls(); // Update dropdown options
+    renderFamilySummary();
+    renderGoalsSummary();
+    renderParentRecentTransactions();
+
+    // If currently on kids view, update that too
+    if (currentView === 'kids') {
+        renderKidsBalanceCards();
+        renderKidsRecentTransactions();
+        renderNextAllowanceCard();
+    }
+
+    alert(`${kid.name} has been removed from your family.`);
 }
 
 // Edit kid profile
@@ -1868,7 +1688,7 @@ function closeKidProfileEdit() {
 }
 
 // Save kid profile changes
-function saveKidProfile() {
+async function saveKidProfile() {
     if (!currentEditKidId) return;
     
     const kid = appData.kids.find(k => k.id === currentEditKidId);
@@ -1927,25 +1747,25 @@ function saveKidProfile() {
         
         appData.transactions.unshift(transaction);
     }
-    
-    saveData();
-    
+
+    await saveData();
+
     // Update all dashboard views
     renderFamilyManagement();
     renderParentControls(); // Update dropdown options
     renderFamilySummary();
     renderGoalsSummary();
     renderParentRecentTransactions();
-    
+
     // If currently on kids view, update that too
     if (currentView === 'kids') {
         renderKidsBalanceCards();
         renderKidsRecentTransactions();
         renderNextAllowanceCard();
     }
-    
+
     closeKidProfileEdit();
-    
+
     alert(`${newName}'s profile has been updated successfully!`);
 }
 
@@ -2016,7 +1836,7 @@ function canUndoLastAllowance() {
 }
 
 // Undo last allowance
-function undoLastAllowance() {
+async function undoLastAllowance() {
     if (!canUndoLastAllowance()) {
         alert('Cannot undo: No recent allowance found or other transactions have occurred since.');
         return;
@@ -2046,35 +1866,23 @@ function undoLastAllowance() {
         }
     }
     
-    // Reverse the balance changes
+    // Reverse the balance changes. The rotation week used when the undone
+    // allowance was originally applied is the one just before the current
+    // (already-advanced) rotation week -- compute this before reverting it below.
     allowanceTransactionsToUndo.forEach(transaction => {
         const kid = appData.kids.find(k => k.id === transaction.kidId);
         if (kid) {
-            const allowanceAmount = transaction.amount;
-            const baseAmount = Math.floor(allowanceAmount / 3);
-            const remainder = allowanceAmount % 3;
-            
-            // Remove base amount
-            kid.balances.save -= baseAmount;
-            kid.balances.spend -= baseAmount;
-            kid.balances.share -= baseAmount;
-            
-            // Remove remainder (need to figure out which buckets got the extra)
-            if (remainder > 0) {
-                // Calculate which buckets got the extra dollars
-                const buckets = ['save', 'spend', 'share'];
-                const rotationIndex = (appData.settings.rotationWeek - 2 + 3) % 3; // Previous rotation
-                
-                for (let i = 0; i < remainder; i++) {
-                    const bucketIndex = (rotationIndex + i) % 3;
-                    kid.balances[buckets[bucketIndex]] -= 1;
-                }
-            }
+            const originalRotationWeek = allowanceLogic.previousRotationWeek(appData.settings.rotationWeek);
+            const distribution = allowanceLogic.distributeAllowance(transaction.amount, originalRotationWeek);
+
+            kid.balances.save -= distribution.save;
+            kid.balances.spend -= distribution.spend;
+            kid.balances.share -= distribution.share;
         }
     });
-    
+
     // Revert rotation week
-    appData.settings.rotationWeek = appData.settings.rotationWeek === 1 ? 3 : appData.settings.rotationWeek - 1;
+    appData.settings.rotationWeek = allowanceLogic.previousRotationWeek(appData.settings.rotationWeek);
     
     // Update last allowance date to the previous allowance (if any)
     const previousAllowanceTransactions = transactionsToKeep.filter(t => t.type === 'allowance');
@@ -2103,41 +1911,28 @@ function undoLastAllowance() {
     
     // Update transactions array
     appData.transactions = [undoTransaction, ...transactionsToKeep];
-    
-    saveData();
+
+    await saveData();
     updateDashboardAfterTransaction();
     updateUndoButtonVisibility();
     renderNextAllowanceCard();
-    
+
     alert(`Successfully undid allowance from ${originalDate}. Removed $${totalUndone.toFixed(2)} total from all kids.`);
 }
 
 // Update the addWeeklyAllowance function to close the confirmation modal
-function addWeeklyAllowance() {
+async function addWeeklyAllowance() {
     // Close confirmation modal if open
     closeAllowanceConfirmation();
-    
+
     appData.kids.forEach(kid => {
-        const allowanceAmount = kid.age;
-        const baseAmount = Math.floor(allowanceAmount / 3);
-        const remainder = allowanceAmount % 3;
-        
-        // Distribute base amount
-        kid.balances.save += baseAmount;
-        kid.balances.spend += baseAmount;
-        kid.balances.share += baseAmount;
-        
-        // Distribute remainder based on rotation
-        if (remainder > 0) {
-            const buckets = ['save', 'spend', 'share'];
-            const rotationIndex = (appData.settings.rotationWeek - 1) % 3;
-            
-            for (let i = 0; i < remainder; i++) {
-                const bucketIndex = (rotationIndex + i) % 3;
-                kid.balances[buckets[bucketIndex]] += 1;
-            }
-        }
-        
+        const age = allowanceLogic.calculateAge(kid.birthday);
+        const distribution = allowanceLogic.distributeAllowance(age, appData.settings.rotationWeek);
+
+        kid.balances.save += distribution.save;
+        kid.balances.spend += distribution.spend;
+        kid.balances.share += distribution.share;
+
         // Add transaction record
         const transaction = {
             id: Date.now() + kid.id,
@@ -2145,42 +1940,40 @@ function addWeeklyAllowance() {
             kidId: kid.id,
             kidName: kid.name,
             bucket: 'all',
-            amount: allowanceAmount,
+            amount: age,
             description: 'Weekly allowance',
             type: 'allowance'
         };
-        
+
         appData.transactions.unshift(transaction);
     });
-    
+
     // Update rotation week
-    appData.settings.rotationWeek = (appData.settings.rotationWeek % 3) + 1;
+    appData.settings.rotationWeek = allowanceLogic.nextRotationWeek(appData.settings.rotationWeek);
     appData.settings.lastAllowanceDate = new Date().toISOString();
-    
-    saveData();
-    
+
+    await saveData();
+
     // Check for goal completions after adding allowance
-    appData.kids.forEach(kid => {
-        checkGoalCompletion(kid);
-    });
-    
+    for (const kid of appData.kids) {
+        await checkGoalCompletion(kid);
+    }
+
     updateDashboardAfterTransaction();
     updateUndoButtonVisibility(); // Show undo button
     renderNextAllowanceCard(); // Update the next allowance card
-    
+
     alert('Weekly allowance added for all kids!');
 }
 
 // Update parent dashboard rendering to include undo button visibility
 function showParentDashboard() {
     currentView = 'parent';
-    
+
     // Update navigation tabs
-    document.getElementById('nav-parent').classList.add('border-blue-500', 'text-blue-600');
-    document.getElementById('nav-parent').classList.remove('border-transparent', 'text-gray-500');
-    document.getElementById('nav-kids').classList.remove('border-blue-500', 'text-blue-600');
-    document.getElementById('nav-kids').classList.add('border-transparent', 'text-gray-500');
-    
+    document.getElementById('nav-parent').classList.add('active');
+    document.getElementById('nav-kids').classList.remove('active');
+
     // Show/hide dashboard views
     document.getElementById('parent-dashboard-view').classList.remove('hidden');
     document.getElementById('kids-dashboard-view').classList.add('hidden');

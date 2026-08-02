@@ -1,0 +1,23 @@
+name: Weekly Allowance
+
+on:
+  schedule:
+    # Sundays at 14:00 UTC. GitHub Actions cron is always UTC -- adjust the
+    # hour to whatever lands at the right local time/day for your family
+    # (and keep it in sync with settings.allowanceDay in the app data).
+    - cron: '0 14 * * 0'
+  workflow_dispatch: {}
+
+jobs:
+  apply-allowance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install @supabase/supabase-js@2 --no-save
+      - run: node scripts/apply-weekly-allowance.js
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
