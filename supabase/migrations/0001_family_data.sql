@@ -31,3 +31,10 @@ create policy "authenticated full access" on family_data
 -- "permission denied" (42501) before the policy above is ever evaluated.
 -- No delete: the app never removes the singleton row.
 grant select, insert, update on public.family_data to authenticated;
+
+-- service_role bypasses RLS but still needs the same base table grant --
+-- Supabase normally sets this up automatically for tables created via the
+-- dashboard Table Editor, but that setup is skipped when a table is created
+-- via raw SQL (as this one was), so it has to be explicit here too. Used
+-- only by the migration script and the weekly-allowance GitHub Action.
+grant select, insert, update on public.family_data to service_role;
