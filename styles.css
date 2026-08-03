@@ -280,7 +280,7 @@ main.page-wrap { padding-top: 22px; padding-bottom: 60px; }
 }
 .btn:active { box-shadow: none; transform: translate(3px, 3px); }
 .btn:disabled { opacity: 0.5; cursor: default; box-shadow: none; transform: none; }
-.btn-outline { background: white; border: 2.5px dashed var(--ink-dim); box-shadow: none; color: var(--ink); }
+.btn-outline { background: white; border: var(--outline-thin); box-shadow: none; color: var(--ink); }
 .btn-solid { background: var(--hero); color: white; }
 .btn-save { background: var(--save); color: white; }
 .btn-spend { background: var(--spend); color: white; }

@@ -49,14 +49,15 @@ A web-based allowance tracking application that helps families teach kids about 
 - Individual balance tracking per child
 
 **Data Management**
-- Local storage with automatic backup
-- Data corruption recovery system
+- Stored in a real database (Supabase/Postgres), synced across every device you log into
 - Manual backup/export to JSON
 - Transaction history with search and filters
 
 ## Getting Started
 
 This app is hosted: a static frontend (this repo, served as-is, no build step) talking to a [Supabase](https://supabase.com) project for storage and auth, with a scheduled GitHub Action applying weekly allowance so it doesn't depend on anyone opening the app on the right day.
+
+**Live at:** https://samsalk.github.io/allowance-app/
 
 ### One-time setup
 
@@ -65,7 +66,7 @@ This app is hosted: a static frontend (this repo, served as-is, no build step) t
 3. **Create the shared family login**: in the Supabase dashboard, Authentication → Users → Add user. Use any email (doesn't need to be real/reachable) and a 6-8 character password -- that password *is* the family PIN everyone uses to unlock the app.
 4. **Fill in `config.js`** with your project's URL and anon public key (Project Settings → API), and the email from step 3.
 5. **Migrate existing data**, if coming from an older localStorage-based copy of this app: use that copy's "Backup Data" button to export a JSON file, then run `python3 scripts/generate-migration-sql.py <the-backup-file>.json` and paste the printed SQL into the Supabase SQL editor. Starting fresh instead? Skip this -- the setup wizard in-app handles it.
-6. **Deploy the frontend**: connect this repo to Cloudflare Pages or Netlify for auto-deploy on push -- no build command needed, it's served as static files.
+6. **Deploy the frontend**: this repo is deployed via GitHub Pages (Settings → Pages → Deploy from a branch → `main` / root) -- auto-deploys on every push to `main`, no build command needed since it's served as static files. Cloudflare Pages or Netlify work just as well if you'd rather not use GitHub Pages.
 7. **Set up the weekly allowance job**: add `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` (Project Settings → API -- keep this one secret, unlike the anon key) as GitHub Actions repo secrets, so `.github/workflows/weekly-allowance.yml` can run. Trigger it once manually (Actions tab → Weekly Allowance → Run workflow) to confirm it works before trusting the schedule.
 
 ### Local development
@@ -119,9 +120,16 @@ The app guides you through a 3-step setup process:
 
 ### Technology Stack
 - Pure HTML5, CSS3, and JavaScript -- no build step, no bundler, no framework
-- TailwindCSS for styling (CDN)
+- Custom design system in `styles.css` ("Comic Pop": bold outlines, flat colors, halftone texture), fonts via Google Fonts (Anton + Archivo Narrow). TailwindCSS (CDN) is still loaded for a handful of base utilities but isn't the primary styling layer.
 - [Supabase](https://supabase.com) (Postgres + Auth) via `@supabase/supabase-js` (CDN) for storage and the shared login
 - A GitHub Actions scheduled workflow for reliably applying weekly allowance server-side
+
+### Mobile-First UI
+Built for phones first, not adapted from a desktop layout after the fact:
+- The Transaction History filter/search screen is a drill-in view (not a popup) with a back link
+- Goal editing and the weekly-allowance confirmation expand inline within the page instead of opening a dialog
+- Adding a child, editing a profile, and reviewing missed allowances use full-screen sheets
+- Every action that saves shows a loading state on its button (disabled + relabeled, e.g. "Saving…") while the network request is in flight
 
 ### Data Storage
 - All app state (`kids`, `settings`, `transactions`) lives as a single JSON document in one row of a `family_data` table in Postgres -- see `supabase/migrations/0001_family_data.sql`
