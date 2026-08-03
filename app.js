@@ -119,6 +119,21 @@ async function saveData() {
     }
 }
 
+// Disables the triggering button and swaps its label while an async action
+// runs -- every mutating action is now a real network round-trip (Supabase),
+// not instant localStorage, so buttons need to show that something's happening.
+async function withLoading(btn, loadingLabel, fn) {
+    const originalText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = loadingLabel;
+    try {
+        await fn();
+    } finally {
+        btn.disabled = false;
+        btn.textContent = originalText;
+    }
+}
+
 // Initialize the app based on current state
 async function initializeApp() {
     // Check if we need to add weekly allowance
@@ -181,29 +196,25 @@ function addKidSetup() {
     const newIndex = kidCount;
     
     const kidHtml = `
-        <div class="kid-setup mb-6 p-4 border-2 border-gray-200 rounded-lg" data-kid-index="${newIndex}">
-            <div class="flex justify-between items-center mb-3">
-                <h4 class="font-semibold text-gray-600">Child ${newIndex + 1}</h4>
-                <button onclick="removeKidSetup(${newIndex})" class="text-red-500 hover:text-red-700 text-sm font-medium" title="Remove this child">
-                    🗑️ Remove
-                </button>
+        <div class="kid-setup kid-manage-card" data-kid-index="${newIndex}" style="margin-bottom: 14px;">
+            <div class="kid-manage-head">
+                <h4 class="kid-name" style="font-size: 16px;">Child ${newIndex + 1}</h4>
+                <button onclick="removeKidSetup(${newIndex})" class="link-btn danger" title="Remove this child">Remove</button>
             </div>
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Name</label>
-                    <input type="text" class="kid-name w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Enter name">
+            <div class="field-grid cols-2">
+                <div class="field">
+                    <label>Name</label>
+                    <input type="text" class="kid-name-input" placeholder="Enter name">
                 </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Birthday</label>
-                    <input type="date" class="kid-birthday w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <div class="field">
+                    <label>Birthday</label>
+                    <input type="date" class="kid-birthday">
                 </div>
             </div>
-            <div class="mt-2 text-sm text-gray-600">
-                <span class="current-age-display">Age will be calculated from birthday</span>
-            </div>
+            <div class="kid-meta current-age-display">Age will be calculated from birthday</div>
         </div>
     `;
-    
+
     container.insertAdjacentHTML('beforeend', kidHtml);
 }
 
@@ -247,7 +258,7 @@ function validateKidsInfo() {
     }
     
     kidSetups.forEach((setup, index) => {
-        const name = setup.querySelector('.kid-name').value.trim();
+        const name = setup.querySelector('.kid-name-input').value.trim();
         const birthday = setup.querySelector('.kid-birthday').value;
         
         if (!name || !birthday) {
@@ -276,26 +287,26 @@ function generateBalancesStep() {
     balancesContainer.innerHTML = '';
     
     kidSetups.forEach((setup, index) => {
-        const name = setup.querySelector('.kid-name').value.trim();
+        const name = setup.querySelector('.kid-name-input').value.trim();
         const birthday = setup.querySelector('.kid-birthday').value;
         
         if (name && birthday) {
             const age = calculateAge(birthday);
             const balanceHtml = `
-                <div class="kid-balances mb-6 p-4 border-2 border-gray-200 rounded-lg" data-kid-index="${index}">
-                    <h4 class="font-semibold mb-3 text-gray-600">${name} (Age ${age}) - Weekly Allowance: $${age}.00</h4>
-                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        <div>
-                            <label class="block text-sm font-medium text-save mb-1">💰 Save Balance</label>
-                            <input type="number" class="balance-save w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-save" step="0.01" min="0" placeholder="0.00">
+                <div class="kid-balances kid-manage-card" data-kid-index="${index}" style="margin-bottom: 14px;">
+                    <h4 class="kid-name" style="font-size: 16px; margin: 0 0 10px;">${name} (Age ${age}) &mdash; $${age}.00 / week</h4>
+                    <div class="field-grid cols-3">
+                        <div class="field">
+                            <label style="color: var(--save);">Save Balance</label>
+                            <input type="number" class="balance-save" step="0.01" min="0" inputmode="decimal" placeholder="0.00">
                         </div>
-                        <div>
-                            <label class="block text-sm font-medium text-spend mb-1">🛍️ Spend Balance</label>
-                            <input type="number" class="balance-spend w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-spend" step="0.01" min="0" placeholder="0.00">
+                        <div class="field">
+                            <label style="color: var(--spend);">Spend Balance</label>
+                            <input type="number" class="balance-spend" step="0.01" min="0" inputmode="decimal" placeholder="0.00">
                         </div>
-                        <div>
-                            <label class="block text-sm font-medium text-share mb-1">❤️ Share Balance</label>
-                            <input type="number" class="balance-share w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-share" step="0.01" min="0" placeholder="0.00">
+                        <div class="field">
+                            <label style="color: var(--share);">Share Balance</label>
+                            <input type="number" class="balance-share" step="0.01" min="0" inputmode="decimal" placeholder="0.00">
                         </div>
                     </div>
                 </div>
@@ -313,20 +324,20 @@ function generateGoalsStep() {
     goalsContainer.innerHTML = '';
     
     kidSetups.forEach((setup, index) => {
-        const name = setup.querySelector('.kid-name').value.trim();
+        const name = setup.querySelector('.kid-name-input').value.trim();
         
         if (name) {
             const goalHtml = `
-                <div class="kid-goal mb-6 p-4 border-2 border-gray-200 rounded-lg" data-kid-index="${index}">
-                    <h4 class="font-semibold mb-3 text-gray-600">${name}'s Savings Goal (Optional)</h4>
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-1">Goal Name</label>
-                            <input type="text" class="goal-name w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="e.g., New Bike, Art Set">
+                <div class="kid-goal kid-manage-card" data-kid-index="${index}" style="margin-bottom: 14px;">
+                    <h4 class="kid-name" style="font-size: 16px; margin: 0 0 10px;">${name}'s Savings Goal (Optional)</h4>
+                    <div class="field-grid cols-2">
+                        <div class="field">
+                            <label>Goal Name</label>
+                            <input type="text" class="goal-name-input" placeholder="e.g., New Bike, Art Set">
                         </div>
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-1">Target Amount</label>
-                            <input type="number" class="goal-target w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" step="0.01" min="0" placeholder="0.00">
+                        <div class="field">
+                            <label>Target Amount</label>
+                            <input type="number" class="goal-target" step="0.01" min="0" inputmode="decimal" placeholder="0.00">
                         </div>
                     </div>
                 </div>
@@ -345,7 +356,7 @@ async function completeSetup() {
     appData.kids = [];
     
     kidSetups.forEach((setup, index) => {
-        const name = setup.querySelector('.kid-name').value.trim();
+        const name = setup.querySelector('.kid-name-input').value.trim();
         const birthday = setup.querySelector('.kid-birthday').value;
         
         if (name && birthday) {
@@ -365,7 +376,7 @@ async function completeSetup() {
             };
             
             // Add goal if provided
-            const goalName = goalSetup.querySelector('.goal-name').value.trim();
+            const goalName = goalSetup.querySelector('.goal-name-input').value.trim();
             const goalTarget = parseFloat(goalSetup.querySelector('.goal-target').value);
             
             if (goalName && goalTarget > 0) {
@@ -1225,8 +1236,8 @@ function renderKidsBalanceCards() {
                         <input type="number" id="goal-target-input" step="0.01" min="0" placeholder="0.00" value="${kid.goal ? kid.goal.target : ''}">
                     </div>
                     <div class="btn-row">
-                        <button onclick="saveGoal()" class="btn btn-solid">Save</button>
-                        ${kid.goal ? '<button onclick="removeGoal()" class="btn btn-spend">Remove</button>' : ''}
+                        <button onclick="withLoading(this, 'Saving…', saveGoal)" class="btn btn-solid">Save</button>
+                        ${kid.goal ? '<button onclick="withLoading(this, \'Removing…\', removeGoal)" class="btn btn-spend">Remove</button>' : ''}
                         <button onclick="closeGoalManagement()" class="btn btn-neutral">Cancel</button>
                     </div>
                 </div>
@@ -1430,7 +1441,7 @@ function renderFamilyManagement() {
                     <p class="kid-name">${kid.name}</p>
                     <div class="kid-manage-actions">
                         <button onclick="editKidProfile(${kid.id})" class="link-btn">Edit</button>
-                        <button onclick="removeKid(${kid.id})" class="link-btn danger" title="Remove this child">Remove</button>
+                        <button onclick="withLoading(this, 'Removing…', () => removeKid(${kid.id}))" class="link-btn danger" title="Remove this child">Remove</button>
                     </div>
                 </div>
                 <div class="info-row"><span>Age</span><span class="val">${kid.age} years old</span></div>

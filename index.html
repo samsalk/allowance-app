@@ -50,104 +50,82 @@
     <main class="page-wrap">
         <!-- Login Screen (shown when not authenticated) -->
         <div id="login-screen" class="hidden">
-            <div class="text-center max-w-md mx-auto">
-                <div class="bg-white rounded-lg shadow-lg p-8">
-                    <h2 class="text-2xl font-bold mb-2 text-gray-800">
-                        🔒 Salkinomics
-                    </h2>
-                    <p class="text-gray-600 mb-6">Enter the family PIN to continue.</p>
-                    <form id="login-form" onsubmit="handleLoginSubmit(event)" class="space-y-4">
-                        <div>
-                            <input type="password" id="login-pin" autocomplete="current-password" class="w-full px-4 py-3 border border-gray-300 rounded-lg text-center text-lg tracking-widest focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Family PIN" required>
-                        </div>
-                        <p id="login-error" class="text-red-600 text-sm hidden"></p>
-                        <button type="submit" id="login-submit-btn" class="w-full bg-blue-500 hover:bg-blue-600 text-white px-6 py-3 rounded-lg font-medium text-lg">
-                            Unlock
-                        </button>
-                    </form>
-                </div>
+            <div class="card" style="max-width: 380px; margin: 48px auto 0; text-align: center;">
+                <div class="kid-stamp" style="margin: 0 auto 14px; width: 56px; height: 56px; font-size: 24px;">🔒</div>
+                <h2 style="font-family: var(--font-display); font-weight: 400; font-size: 25px; margin: 0 0 6px;">Salkinomics</h2>
+                <p style="color: var(--ink-dim); font-weight: 600; font-size: 14px; margin: 0 0 18px;">Enter the family PIN to continue.</p>
+                <form id="login-form" onsubmit="handleLoginSubmit(event)">
+                    <div class="field">
+                        <input type="password" id="login-pin" autocomplete="current-password" placeholder="Family PIN" required style="text-align: center; letter-spacing: 0.08em;">
+                    </div>
+                    <p id="login-error" class="hidden" style="color: var(--spend); font-weight: 700; font-size: 13px; margin: 2px 0 10px;"></p>
+                    <button type="submit" id="login-submit-btn" class="btn btn-solid" style="width: 100%; justify-content: center; margin-top: 4px;">Unlock</button>
+                </form>
             </div>
         </div>
 
         <!-- Setup Wizard (shown initially) -->
         <div id="setup-wizard" class="hidden">
-            <div class="bg-white rounded-lg shadow-lg p-8 max-w-2xl mx-auto">
-                <h2 class="text-2xl font-bold text-center mb-6 text-gray-800">
-                    🎯 Let's Set Up Your Family!
-                </h2>
-                
+            <div class="card" style="max-width: 560px; margin: 20px auto 0;">
+                <h2 style="font-family: var(--font-display); font-weight: 400; font-size: 26px; text-align: center; margin: 0 0 20px;">Let's Set Up Your Family!</h2>
+
                 <!-- Step 1: Kids Info -->
                 <div id="setup-step-1" class="setup-step">
-                    <h3 class="text-xl font-semibold mb-4 text-gray-700">Step 1: Tell us about your kids</h3>
-                    
+                    <div class="eyebrow" style="margin-bottom: 8px;">Step 1 of 3</div>
+                    <h3 style="font-family: var(--font-display); font-weight: 400; font-size: 19px; margin: 0 0 14px;">Tell us about your kids</h3>
+
                     <div id="kids-container">
                         <!-- Kid 1 -->
-                        <div class="kid-setup mb-6 p-4 border-2 border-gray-200 rounded-lg" data-kid-index="0">
-                            <div class="flex justify-between items-center mb-3">
-                                <h4 class="font-semibold text-gray-600">Child 1</h4>
-                                <button onclick="removeKidSetup(0)" class="text-red-500 hover:text-red-700 text-sm font-medium" title="Remove this child">
-                                    🗑️ Remove
-                                </button>
+                        <div class="kid-setup kid-manage-card" data-kid-index="0" style="margin-bottom: 14px;">
+                            <div class="kid-manage-head">
+                                <h4 class="kid-name" style="font-size: 16px;">Child 1</h4>
+                                <button onclick="removeKidSetup(0)" class="link-btn danger" title="Remove this child">Remove</button>
                             </div>
-                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <div>
-                                    <label class="block text-sm font-medium text-gray-700 mb-1">Name</label>
-                                    <input type="text" class="kid-name w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Enter name">
+                            <div class="field-grid cols-2">
+                                <div class="field">
+                                    <label>Name</label>
+                                    <input type="text" class="kid-name-input" placeholder="Enter name">
                                 </div>
-                                <div>
-                                    <label class="block text-sm font-medium text-gray-700 mb-1">Birthday</label>
-                                    <input type="date" class="kid-birthday w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                <div class="field">
+                                    <label>Birthday</label>
+                                    <input type="date" class="kid-birthday">
                                 </div>
                             </div>
-                            <div class="mt-2 text-sm text-gray-600">
-                                <span class="current-age-display">Age will be calculated from birthday</span>
-                            </div>
+                            <div class="kid-meta current-age-display">Age will be calculated from birthday</div>
                         </div>
                     </div>
 
                     <!-- Add Another Child Button -->
-                    <div class="mb-6">
-                        <button onclick="addKidSetup()" class="w-full py-3 border-2 border-dashed border-blue-300 rounded-lg text-blue-600 hover:bg-blue-50 hover:border-blue-400 font-medium transition-colors">
-                            ➕ Add Another Child
-                        </button>
-                    </div>
+                    <button onclick="addKidSetup()" class="btn btn-outline" style="width: 100%; justify-content: center; margin-bottom: 18px;">+ Add Another Child</button>
 
-                    <div class="flex justify-end">
-                        <button onclick="nextSetupStep()" class="bg-blue-500 hover:bg-blue-600 text-white px-6 py-2 rounded-lg font-medium">
-                            Next: Starting Balances →
-                        </button>
+                    <div style="display: flex; justify-content: flex-end;">
+                        <button onclick="nextSetupStep()" class="btn btn-solid">Next: Starting Balances</button>
                     </div>
                 </div>
 
                 <!-- Step 2: Starting Balances -->
                 <div id="setup-step-2" class="setup-step hidden">
-                    <h3 class="text-xl font-semibold mb-4 text-gray-700">Step 2: Enter starting balances</h3>
+                    <div class="eyebrow" style="margin-bottom: 8px;">Step 2 of 3</div>
+                    <h3 style="font-family: var(--font-display); font-weight: 400; font-size: 19px; margin: 0 0 14px;">Enter starting balances</h3>
                     <div id="balances-container">
                         <!-- Will be populated by JavaScript -->
                     </div>
-                    <div class="flex justify-between mt-6">
-                        <button onclick="prevSetupStep()" class="bg-gray-500 hover:bg-gray-600 text-white px-6 py-2 rounded-lg font-medium">
-                            ← Back
-                        </button>
-                        <button onclick="nextSetupStep()" class="bg-blue-500 hover:bg-blue-600 text-white px-6 py-2 rounded-lg font-medium">
-                            Next: Savings Goals →
-                        </button>
+                    <div style="display: flex; justify-content: space-between;">
+                        <button onclick="prevSetupStep()" class="btn btn-neutral">Back</button>
+                        <button onclick="nextSetupStep()" class="btn btn-solid">Next: Savings Goals</button>
                     </div>
                 </div>
 
                 <!-- Step 3: Savings Goals -->
                 <div id="setup-step-3" class="setup-step hidden">
-                    <h3 class="text-xl font-semibold mb-4 text-gray-700">Step 3: Set savings goals (optional)</h3>
+                    <div class="eyebrow" style="margin-bottom: 8px;">Step 3 of 3</div>
+                    <h3 style="font-family: var(--font-display); font-weight: 400; font-size: 19px; margin: 0 0 14px;">Set savings goals (optional)</h3>
                     <div id="goals-container">
                         <!-- Will be populated by JavaScript -->
                     </div>
-                    <div class="flex justify-between mt-6">
-                        <button onclick="prevSetupStep()" class="bg-gray-500 hover:bg-gray-600 text-white px-6 py-2 rounded-lg font-medium">
-                            ← Back
-                        </button>
-                        <button onclick="completeSetup()" class="bg-green-500 hover:bg-green-600 text-white px-6 py-2 rounded-lg font-medium">
-                            🎉 Complete Setup
-                        </button>
+                    <div style="display: flex; justify-content: space-between;">
+                        <button onclick="prevSetupStep()" class="btn btn-neutral">Back</button>
+                        <button onclick="withLoading(this, 'Setting up…', completeSetup)" class="btn btn-solid">Complete Setup</button>
                     </div>
                 </div>
             </div>
@@ -160,7 +138,7 @@
                 <p id="catchup-message"></p>
                 <div class="btn-row">
                     <button onclick="showCatchupReview()" class="btn btn-outline">Review Missed Allowances</button>
-                    <button onclick="addAllMissedAllowances()" class="btn btn-solid">Add All Automatically</button>
+                    <button onclick="withLoading(this, 'Adding…', addAllMissedAllowances)" class="btn btn-solid">Add All Automatically</button>
                     <button onclick="dismissCatchupAlert()" class="btn btn-neutral">Dismiss</button>
                 </div>
             </div>
@@ -221,8 +199,8 @@
                 </div>
 
                 <div class="btn-row center">
-                    <button onclick="addMoney()" class="btn btn-save">Add Money</button>
-                    <button onclick="recordSpending()" class="btn btn-spend">Record Spending</button>
+                    <button onclick="withLoading(this, 'Saving…', addMoney)" class="btn btn-save">Add Money</button>
+                    <button onclick="withLoading(this, 'Saving…', recordSpending)" class="btn btn-spend">Record Spending</button>
                 </div>
             </div>
 
@@ -231,16 +209,16 @@
                 <h2>Administrative Actions</h2>
                 <div class="btn-row">
                     <button onclick="confirmAddWeeklyAllowance()" class="btn btn-solid">Add Weekly Allowance</button>
-                    <button id="undo-allowance-btn" onclick="undoLastAllowance()" class="btn btn-outline hidden">Undo Last Allowance</button>
+                    <button id="undo-allowance-btn" onclick="withLoading(this, 'Undoing…', undoLastAllowance)" class="btn btn-outline hidden">Undo Last Allowance</button>
                     <button onclick="showTransactionHistory()" class="btn btn-neutral">View History</button>
                     <button onclick="backupData()" class="btn btn-neutral">Backup Data</button>
-                    <button onclick="signOut()" class="btn btn-neutral">Sign Out</button>
+                    <button onclick="withLoading(this, 'Signing out…', signOut)" class="btn btn-neutral">Sign Out</button>
                 </div>
                 <div id="allowance-confirmation-modal" class="inline-expand hidden">
                     <p style="margin: 0 0 10px; font-size: 14px;">This will add the following amounts:</p>
                     <div id="allowance-preview-list" style="margin-bottom: 14px;"></div>
                     <div class="btn-row">
-                        <button onclick="addWeeklyAllowance()" class="btn btn-solid">Confirm</button>
+                        <button onclick="withLoading(this, 'Adding…', addWeeklyAllowance)" class="btn btn-solid">Confirm</button>
                         <button onclick="closeAllowanceConfirmation()" class="btn btn-neutral">Cancel</button>
                     </div>
                 </div>
@@ -285,35 +263,29 @@
 
         <!-- Welcome Screen (shown first time) -->
         <div id="welcome-screen">
-            <div class="text-center max-w-2xl mx-auto">
-                <div class="bg-white rounded-lg shadow-lg p-8">
-                    <h2 class="text-3xl font-bold mb-4 text-gray-800">
-                        Welcome to Salkinomics! 🎉
-                    </h2>
-                    <p class="text-lg text-gray-600 mb-6">
-                        Help your kids learn about money management with three simple buckets:
-                    </p>
-                    <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-                        <div class="text-center">
-                            <div class="text-4xl mb-2">💰</div>
-                            <h3 class="font-bold text-save">SAVE</h3>
-                            <p class="text-sm text-gray-600">For future goals</p>
-                        </div>
-                        <div class="text-center">
-                            <div class="text-4xl mb-2">🛍️</div>
-                            <h3 class="font-bold text-spend">SPEND</h3>
-                            <p class="text-sm text-gray-600">For fun purchases</p>
-                        </div>
-                        <div class="text-center">
-                            <div class="text-4xl mb-2">❤️</div>
-                            <h3 class="font-bold text-share">SHARE</h3>
-                            <p class="text-sm text-gray-600">For helping others</p>
-                        </div>
+            <div class="card" style="max-width: 560px; margin: 40px auto 0; text-align: center;">
+                <h2 style="font-family: var(--font-display); font-weight: 400; font-size: 28px; margin: 0 0 10px;">Welcome to Salkinomics! 🎉</h2>
+                <p style="color: var(--ink-dim); font-weight: 600; margin: 0 0 22px;">
+                    Help your kids learn about money management with three simple buckets:
+                </p>
+                <div class="buckets" style="margin-bottom: 26px;">
+                    <div class="bucket save-bucket" style="padding: 16px 6px;">
+                        <div class="bucket-icon"><svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10c0-1 3-3 8-3s8 2 8 3v6c0 1-3 3-8 3s-8-2-8-3z"/><path d="M4 10c0 1 3 3 8 3s8-2 8-3"/></svg></div>
+                        <div class="bucket-label">Save</div>
+                        <div style="color: rgba(255,255,255,0.85); font-size: 11px; font-weight: 700; margin-top: 4px;">For future goals</div>
                     </div>
-                    <button onclick="startSetup()" class="bg-blue-500 hover:bg-blue-600 text-white px-8 py-3 rounded-lg font-medium text-lg">
-                        🚀 Get Started
-                    </button>
+                    <div class="bucket spend-bucket" style="padding: 16px 6px;">
+                        <div class="bucket-icon"><svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 7h11l2 12H4z"/><path d="M9 7a3 3 0 0 1 6 0"/></svg></div>
+                        <div class="bucket-label">Spend</div>
+                        <div style="color: rgba(255,255,255,0.85); font-size: 11px; font-weight: 700; margin-top: 4px;">For fun purchases</div>
+                    </div>
+                    <div class="bucket share-bucket" style="padding: 16px 6px;">
+                        <div class="bucket-icon"><svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20s-7-4.4-9.3-8.8C1.2 8 2.7 5 6 5c2 0 3.3 1 4 2.2C10.7 6 12 5 14 5c3.3 0 4.8 3 3.3 6.2C15 15.6 12 20 12 20z"/></svg></div>
+                        <div class="bucket-label">Share</div>
+                        <div style="color: rgba(255,255,255,0.85); font-size: 11px; font-weight: 700; margin-top: 4px;">For helping others</div>
+                    </div>
                 </div>
+                <button onclick="startSetup()" class="btn btn-solid" style="font-size: 14px; padding: 14px 28px;">Get Started</button>
             </div>
         </div>
     </main>
@@ -409,7 +381,7 @@
             </div>
             <div class="sheet-actions">
                 <button onclick="closeKidProfileEdit()" class="btn btn-neutral">Cancel</button>
-                <button onclick="saveKidProfile()" class="btn btn-solid">Save Changes</button>
+                <button onclick="withLoading(this, 'Saving…', saveKidProfile)" class="btn btn-solid">Save Changes</button>
             </div>
         </div>
     </div>
@@ -451,7 +423,7 @@
             </div>
             <div class="sheet-actions">
                 <button onclick="closeAddKidModal()" class="btn btn-neutral">Cancel</button>
-                <button onclick="saveNewKid()" class="btn btn-solid">Add Child</button>
+                <button onclick="withLoading(this, 'Adding…', saveNewKid)" class="btn btn-solid">Add Child</button>
             </div>
         </div>
     </div>
@@ -486,7 +458,7 @@
             </div>
             <div class="sheet-actions">
                 <button onclick="closeCatchupReview()" class="btn btn-neutral">Cancel</button>
-                <button onclick="addSelectedAllowances()" class="btn btn-solid">Add Selected</button>
+                <button onclick="withLoading(this, 'Adding…', addSelectedAllowances)" class="btn btn-solid">Add Selected</button>
             </div>
         </div>
     </div>

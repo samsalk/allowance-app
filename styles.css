@@ -353,6 +353,7 @@ main.page-wrap { padding-top: 22px; padding-bottom: 60px; }
   letter-spacing: 0.05em; text-transform: uppercase; color: var(--ink);
 }
 .link-btn.danger { color: var(--spend); }
+.link-btn:disabled { opacity: 0.5; cursor: default; }
 
 .two-col { display: grid; grid-template-columns: 1fr; gap: 18px; }
 @media (min-width: 620px) {
