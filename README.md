@@ -1,4 +1,4 @@
-# Save, Spend, Share - Family Allowance Tracker
+# Salkinomics - Family Allowance Tracker
 
 A web-based allowance tracking application that helps families teach kids about money management using the three-bucket system: Save, Spend, and Share.
 

@@ -1,4 +1,4 @@
-// Save, Spend, Share - Family Allowance Tracker
+// Salkinomics - Family Allowance Tracker
 // Main JavaScript functionality
 
 // Global state
