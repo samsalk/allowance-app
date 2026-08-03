@@ -13,7 +13,8 @@ let appData = {
 };
 
 let currentSetupStep = 1;
-let currentGoalKidId = null; // For goal management modal
+let currentGoalKidId = null; // For goal celebration modal
+let editingGoalKidId = null; // Kid whose card currently shows the inline goal-edit form
 let currentView = 'kids'; // 'kids' or 'parent'
 let missedWeeksData = null; // For catch-up functionality
 let currentEditKidId = null; // For kid profile editing
@@ -432,12 +433,6 @@ function calculateAge(birthday) {
     return age;
 }
 
-// Get emoji for kid (simple alternating)
-function getKidEmoji(name) {
-    if (name.toLowerCase() === 'noah') return '👦';
-    return name.toLowerCase().includes('a') || name.toLowerCase().includes('e') ? '👧' : '👦';
-}
-
 // Render parent controls
 function renderParentControls() {
     const select = document.getElementById('transaction-kid');
@@ -699,79 +694,64 @@ async function checkBirthdays() {
     }
 }
 
-// Open goal management modal
+// Open the inline goal-edit form within the kid's card
 function openGoalManagement(kidId) {
     const kid = appData.kids.find(k => k.id === kidId);
     if (!kid) return;
-    
-    currentGoalKidId = kidId;
-    
-    const modal = document.getElementById('goal-management-modal');
-    const nameInput = document.getElementById('goal-name-input');
-    const targetInput = document.getElementById('goal-target-input');
-    
-    if (kid.goal) {
-        nameInput.value = kid.goal.name;
-        targetInput.value = kid.goal.target;
-    } else {
-        nameInput.value = '';
-        targetInput.value = '';
-    }
-    
-    modal.classList.remove('hidden');
+
+    editingGoalKidId = kidId;
+    renderKidsBalanceCards();
 }
 
-// Close goal management modal
+// Close the inline goal-edit form
 function closeGoalManagement() {
-    document.getElementById('goal-management-modal').classList.add('hidden');
-    currentGoalKidId = null;
+    editingGoalKidId = null;
+    renderKidsBalanceCards();
 }
 
-// Save goal from modal
+// Save goal from the inline form
 async function saveGoal() {
-    if (!currentGoalKidId) return;
-    
-    const kid = appData.kids.find(k => k.id === currentGoalKidId);
+    if (!editingGoalKidId) return;
+
+    const kid = appData.kids.find(k => k.id === editingGoalKidId);
     if (!kid) return;
-    
+
     const goalName = document.getElementById('goal-name-input').value.trim();
     const goalTarget = parseFloat(document.getElementById('goal-target-input').value);
-    
+
     if (!goalName || !goalTarget || goalTarget <= 0) {
         alert('Please enter a valid goal name and target amount.');
         return;
     }
-    
+
     kid.goal = {
         name: goalName,
         target: goalTarget
     };
 
     await saveData();
-    renderKidsBalanceCards();
     closeGoalManagement();
 }
 
 // Remove goal
 async function removeGoal() {
-    if (!currentGoalKidId) return;
+    if (!editingGoalKidId) return;
 
-    const kid = appData.kids.find(k => k.id === currentGoalKidId);
+    const kid = appData.kids.find(k => k.id === editingGoalKidId);
     if (!kid) return;
 
     if (confirm(`Are you sure you want to remove ${kid.name}'s savings goal?`)) {
         delete kid.goal;
         await saveData();
-        renderKidsBalanceCards();
         closeGoalManagement();
     }
 }
 
 // Show transaction history modal
 function showTransactionHistory() {
-    const modal = document.getElementById('transaction-history-modal');
+    const view = document.getElementById('transaction-history-modal');
     const kidFilter = document.getElementById('history-filter-kid');
-    
+
     // Populate kid filter
     kidFilter.innerHTML = '<option value="">All Kids</option>';
     appData.kids.forEach(kid => {
@@ -780,20 +760,27 @@ function showTransactionHistory() {
         option.textContent = kid.name;
         kidFilter.appendChild(option);
     });
-    
+
     // Add event listeners for filters
     document.getElementById('history-filter-kid').addEventListener('change', filterTransactionHistory);
     document.getElementById('history-filter-bucket').addEventListener('change', filterTransactionHistory);
     document.getElementById('history-filter-type').addEventListener('change', filterTransactionHistory);
     document.getElementById('history-search').addEventListener('input', filterTransactionHistory);
-    
-    modal.classList.remove('hidden');
+
+    // Drill-in view: hide the dashboards and nav, show this in their place.
+    document.getElementById('kids-dashboard-view').classList.add('hidden');
+    document.getElementById('parent-dashboard-view').classList.add('hidden');
+    document.getElementById('main-navigation').classList.add('hidden');
+    view.classList.remove('hidden');
+
     filterTransactionHistory(); // Initial load
 }
 
-// Close transaction history modal
+// Close the transaction history view and return to the Parent Dashboard
 function closeTransactionHistory() {
     document.getElementById('transaction-history-modal').classList.add('hidden');
+    document.getElementById('main-navigation').classList.remove('hidden');
+    showParentDashboard();
 }
 
 // Filter transaction history
@@ -821,74 +808,15 @@ function filterTransactionHistory() {
 function renderTransactionHistory(transactions) {
     const container = document.getElementById('transaction-history-list');
     const countElement = document.getElementById('transaction-count');
-    
+
     countElement.textContent = `Showing ${transactions.length} transaction${transactions.length !== 1 ? 's' : ''}`;
-    
+
     if (transactions.length === 0) {
-        container.innerHTML = '<p class="text-gray-500 text-center py-4">No transactions match your filters.</p>';
+        container.innerHTML = '<p class="empty-note">No transactions match your filters.</p>';
         return;
     }
-    
-    container.innerHTML = '';
-    
-    transactions.forEach(transaction => {
-        const date = new Date(transaction.date).toLocaleDateString();
-        const time = new Date(transaction.date).toLocaleTimeString();
-        
-        let bucketEmoji = '📅';
-        let bucketName = 'All Buckets';
-        
-        if (transaction.bucket === 'save') {
-            bucketEmoji = '💰';
-            bucketName = 'Save';
-        } else if (transaction.bucket === 'spend') {
-            bucketEmoji = '🛍️';
-            bucketName = 'Spend';
-        } else if (transaction.bucket === 'share') {
-            bucketEmoji = '❤️';
-            bucketName = 'Share';
-        }
-        
-        let typeColor = 'text-gray-600';
-        let amountPrefix = '';
-        
-        if (transaction.type === 'allowance') {
-            typeColor = 'text-green-600';
-            amountPrefix = '+';
-        } else if (transaction.type === 'deduction') {
-            typeColor = 'text-red-600';
-            amountPrefix = '-';
-        } else if (transaction.type === 'goal_completed') {
-            typeColor = 'text-purple-600';
-            amountPrefix = '🎯';
-        } else if (transaction.type === 'birthday') {
-            typeColor = 'text-blue-600';
-            amountPrefix = '🎂';
-        }
-        
-        const transactionHtml = `
-            <div class="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
-                <div class="flex items-center space-x-3">
-                    <span class="text-lg">${bucketEmoji}</span>
-                    <div>
-                        <div class="font-medium text-gray-800">
-                            ${transaction.kidName} - ${bucketName}
-                        </div>
-                        <div class="text-sm text-gray-600">${transaction.description}</div>
-                        <div class="text-xs text-gray-500">${date} at ${time}</div>
-                    </div>
-                </div>
-                <div class="text-right">
-                    <div class="font-bold ${typeColor}">
-                        ${amountPrefix}${transaction.amount > 0 ? '$' + transaction.amount.toFixed(2) : ''}
-                    </div>
-                    <div class="text-xs text-gray-500 capitalize">${transaction.type.replace('_', ' ')}</div>
-                </div>
-            </div>
-        `;
-        
-        container.innerHTML += transactionHtml;
-    });
+
+    container.innerHTML = transactions.map(t => activityStubHtml(t, { showTime: true })).join('');
 }
 
 // Export transactions to CSV
@@ -1040,58 +968,55 @@ function showCatchupReview() {
     
     // Generate detailed week breakdown and kid selection controls
     kidsContainer.innerHTML = '';
-    
+
     // First, show the specific missed weeks
     const missedWeeksHtml = `
-        <div class="mb-6 p-4 bg-blue-50 rounded-lg border border-blue-200">
-            <h4 class="font-semibold text-blue-800 mb-3">📅 Missed Weeks:</h4>
-            <div class="space-y-2">
-                ${missedWeeksData.specificWeeks.map((week, index) => `
-                    <div class="flex justify-between items-center text-sm">
-                        <span class="text-blue-700">Week ${index + 1}: ${week.dateRange}</span>
-                        <span class="text-blue-600 font-medium">$${appData.kids.reduce((sum, kid) => sum + kid.age, 0).toFixed(2)} total</span>
-                    </div>
-                `).join('')}
-            </div>
+        <div class="notice">
+            <h3 style="margin-bottom: 8px;">Missed Weeks</h3>
+            ${missedWeeksData.specificWeeks.map((week, index) => `
+                <div class="info-row">
+                    <span>Week ${index + 1}: ${week.dateRange}</span>
+                    <span class="val">$${appData.kids.reduce((sum, kid) => sum + kid.age, 0).toFixed(2)}</span>
+                </div>
+            `).join('')}
         </div>
     `;
     kidsContainer.innerHTML += missedWeeksHtml;
-    
+
     // Then show kid selection controls
     appData.kids.forEach(kid => {
         const weeklyAmount = kid.age;
         const totalAmount = weeklyAmount * missedWeeksData.missedWeeks;
-        
+
         const kidHtml = `
-            <div class="p-4 border border-gray-200 rounded-lg">
-                <div class="flex items-center justify-between mb-3">
-                    <h4 class="font-semibold text-gray-800">${getKidEmoji(kid.name)} ${kid.name} (Age ${kid.age})</h4>
-                    <span class="text-sm text-gray-600">$${weeklyAmount}.00 per week</span>
+            <div class="kid-manage-card" style="margin-bottom: 12px;">
+                <div class="kid-manage-head">
+                    <span class="kid-name" style="font-size: 16px;">${kid.name} (Age ${kid.age})</span>
+                    <span class="kid-meta">$${weeklyAmount}.00 / week</span>
                 </div>
-                <div class="flex items-center space-x-3 mb-2">
-                    <label class="text-sm font-medium text-gray-700">Weeks to add:</label>
-                    <select id="catchup-weeks-${kid.id}" class="px-3 py-1 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
-                        ${Array.from({length: missedWeeksData.missedWeeks + 1}, (_, i) => 
+                <div class="field">
+                    <label for="catchup-weeks-${kid.id}">Weeks to add (Total: $<span id="catchup-total-${kid.id}">${totalAmount.toFixed(2)}</span>)</label>
+                    <select id="catchup-weeks-${kid.id}">
+                        ${Array.from({length: missedWeeksData.missedWeeks + 1}, (_, i) =>
                             `<option value="${i}" ${i === missedWeeksData.missedWeeks ? 'selected' : ''}>${i}</option>`
                         ).join('')}
                     </select>
-                    <span class="text-sm text-gray-600">Total: $<span id="catchup-total-${kid.id}">${totalAmount.toFixed(2)}</span></span>
                 </div>
-                <div class="text-xs text-gray-500">
+                <div class="stub-sub catchup-week-preview">
                     Will add allowances for: ${missedWeeksData.specificWeeks.slice(0, missedWeeksData.missedWeeks).map(w => w.dateRange).join(', ')}
                 </div>
             </div>
         `;
         kidsContainer.innerHTML += kidHtml;
-        
+
         // Add event listener to update total and week preview
         document.getElementById(`catchup-weeks-${kid.id}`).addEventListener('change', function() {
             const weeks = parseInt(this.value);
             const total = weeklyAmount * weeks;
             document.getElementById(`catchup-total-${kid.id}`).textContent = total.toFixed(2);
-            
+
             // Update week preview
-            const previewElement = this.parentElement.parentElement.querySelector('.text-xs.text-gray-500');
+            const previewElement = this.closest('.kid-manage-card').querySelector('.catchup-week-preview');
             if (weeks === 0) {
                 previewElement.textContent = 'No weeks selected';
             } else {
@@ -1100,7 +1025,7 @@ function showCatchupReview() {
             }
         });
     });
-    
+
     modal.classList.remove('hidden');
 }
 
@@ -1261,17 +1186,18 @@ function calculateNextAllowanceDistribution(kid) {
 // Render kids balance cards (updated for new container)
 // Small inline-icon glyphs for each bucket, used instead of emoji.
 const BUCKET_ICONS = {
-    save: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 10c0-1 3-3 8-3s8 2 8 3v6c0 1-3 3-8 3s-8-2-8-3z"/><path d="M4 10c0 1 3 3 8 3s8-2 8-3"/></svg>',
-    spend: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 7h11l2 12H4z"/><path d="M9 7a3 3 0 0 1 6 0"/></svg>',
-    share: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20s-7-4.4-9.3-8.8C1.2 8 2.7 5 6 5c2 0 3.3 1 4 2.2C10.7 6 12 5 14 5c3.3 0 4.8 3 3.3 6.2C15 15.6 12 20 12 20z"/></svg>'
+    save: '<svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10c0-1 3-3 8-3s8 2 8 3v6c0 1-3 3-8 3s-8-2-8-3z"/><path d="M4 10c0 1 3 3 8 3s8-2 8-3"/></svg>',
+    spend: '<svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 7h11l2 12H4z"/><path d="M9 7a3 3 0 0 1 6 0"/></svg>',
+    share: '<svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20s-7-4.4-9.3-8.8C1.2 8 2.7 5 6 5c2 0 3.3 1 4 2.2C10.7 6 12 5 14 5c3.3 0 4.8 3 3.3 6.2C15 15.6 12 20 12 20z"/></svg>',
+    all: '<svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>'
 };
 
 function bucketRowHtml(bucket, label, amount) {
     return `
-        <div class="bucket-row">
-            <span class="bucket-icon ${bucket}-tone">${BUCKET_ICONS[bucket]}</span>
-            <span class="bucket-label ${bucket}-tone">${label}</span>
-            <span class="bucket-amount">$${amount.toFixed(2)}</span>
+        <div class="bucket ${bucket}-bucket">
+            <div class="bucket-icon">${BUCKET_ICONS[bucket]}</div>
+            <div class="bucket-label">${label}</div>
+            <div class="bucket-amount">$${amount.toFixed(2)}</div>
         </div>
     `;
 }
@@ -1287,7 +1213,25 @@ function renderKidsBalanceCards() {
         const nextAllowance = calculateNextAllowanceDistribution(kid);
 
         let goalHtml = '';
-        if (kid.goal) {
+        if (kid.id === editingGoalKidId) {
+            goalHtml = `
+                <div class="inline-expand">
+                    <div class="field">
+                        <label for="goal-name-input">Goal Name</label>
+                        <input type="text" id="goal-name-input" placeholder="e.g., New Bike, Art Set" value="${kid.goal ? kid.goal.name : ''}">
+                    </div>
+                    <div class="field">
+                        <label for="goal-target-input">Target Amount</label>
+                        <input type="number" id="goal-target-input" step="0.01" min="0" placeholder="0.00" value="${kid.goal ? kid.goal.target : ''}">
+                    </div>
+                    <div class="btn-row">
+                        <button onclick="saveGoal()" class="btn btn-solid">Save</button>
+                        ${kid.goal ? '<button onclick="removeGoal()" class="btn btn-spend">Remove</button>' : ''}
+                        <button onclick="closeGoalManagement()" class="btn btn-neutral">Cancel</button>
+                    </div>
+                </div>
+            `;
+        } else if (kid.goal) {
             const progress = Math.min((kid.balances.save / kid.goal.target) * 100, 100);
             const remaining = Math.max(kid.goal.target - kid.balances.save, 0);
 
@@ -1341,16 +1285,22 @@ function renderKidsBalanceCards() {
 // and parent activity lists.
 function activityStubHtml(transaction, { showTime = false } = {}) {
     const dateObj = new Date(transaction.date);
-    const [monthLabel, dayLabel] = dateObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }).split(' ');
+    const dateLabel = dateObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 
-    let tone = '';
-    let amountPrefix = '';
+    let tone = 'save-tone';
+    let iconBg = 'save-bucket';
+    let icon = BUCKET_ICONS.all;
+    let amountPrefix = '+';
+
     if (transaction.type === 'deduction') {
         tone = 'spend-tone';
+        iconBg = 'spend-bucket';
+        icon = BUCKET_ICONS.spend;
         amountPrefix = '−';
-    } else if (transaction.amount > 0) {
-        tone = 'save-tone';
-        amountPrefix = '+';
+    } else if (['save', 'spend', 'share'].includes(transaction.bucket)) {
+        tone = `${transaction.bucket}-tone`;
+        iconBg = `${transaction.bucket}-bucket`;
+        icon = BUCKET_ICONS[transaction.bucket];
     }
 
     const typeLabels = {
@@ -1368,10 +1318,10 @@ function activityStubHtml(transaction, { showTime = false } = {}) {
 
     return `
         <div class="stub">
-            <div class="stub-date">${monthLabel.toUpperCase()}<br>${dayLabel || ''}</div>
+            <div class="stub-icon ${iconBg}">${icon}</div>
             <div class="stub-desc">
                 <span class="who">${transaction.kidName}</span> &mdash; ${label}
-                <div class="stub-sub">${transaction.description}${timeStr}</div>
+                <div class="stub-sub">${transaction.description} &middot; ${dateLabel}${timeStr}</div>
             </div>
             <div class="stub-amt ${tone}">${amountHtml}</div>
         </div>
@@ -1779,15 +1729,13 @@ function confirmAddWeeklyAllowance() {
     appData.kids.forEach(kid => {
         const distribution = calculateNextAllowanceDistribution(kid);
         const total = distribution.save + distribution.spend + distribution.share;
-        
+
         const previewHtml = `
-            <div class="flex justify-between items-center">
-                <span class="font-medium">${getKidEmoji(kid.name)} ${kid.name} (Age ${kid.age}):</span>
-                <span class="font-bold">$${total.toFixed(2)}</span>
+            <div class="info-row">
+                <span>${kid.name} (Age ${kid.age})</span>
+                <span class="val">$${total.toFixed(2)}</span>
             </div>
-            <div class="text-sm text-gray-600 ml-6">
-                +$${distribution.save} Save, +$${distribution.spend} Spend, +$${distribution.share} Share
-            </div>
+            <div class="stub-sub" style="margin: -6px 0 6px;">+$${distribution.save} Save, +$${distribution.spend} Spend, +$${distribution.share} Share</div>
         `;
         previewList.innerHTML += previewHtml;
     });

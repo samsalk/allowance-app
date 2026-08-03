@@ -21,7 +21,7 @@
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Libre+Caslon+Text:ital@0;1&family=Archivo+Narrow:wght@500;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Anton&family=Archivo+Narrow:wght@500;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -236,6 +236,14 @@
                     <button onclick="backupData()" class="btn btn-neutral">Backup Data</button>
                     <button onclick="signOut()" class="btn btn-neutral">Sign Out</button>
                 </div>
+                <div id="allowance-confirmation-modal" class="inline-expand hidden">
+                    <p style="margin: 0 0 10px; font-size: 14px;">This will add the following amounts:</p>
+                    <div id="allowance-preview-list" style="margin-bottom: 14px;"></div>
+                    <div class="btn-row">
+                        <button onclick="addWeeklyAllowance()" class="btn btn-solid">Confirm</button>
+                        <button onclick="closeAllowanceConfirmation()" class="btn btn-neutral">Cancel</button>
+                    </div>
+                </div>
             </div>
 
             <!-- Family Management -->
@@ -311,262 +319,174 @@
     </main>
 
     <!-- Goal Completion Celebration Modal -->
-    <div id="goal-celebration-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
-        <div class="bg-white rounded-lg shadow-xl p-8 max-w-md mx-4 text-center">
-            <div class="text-6xl mb-4">🎉</div>
-            <h2 class="text-2xl font-bold text-gray-800 mb-2">Congratulations!</h2>
-            <p id="goal-celebration-message" class="text-lg text-gray-600 mb-6"></p>
-            <div class="space-y-3">
-                <button onclick="setNewGoal()" class="w-full bg-green-500 hover:bg-green-600 text-white px-6 py-3 rounded-lg font-medium">
-                    🎯 Set New Goal
-                </button>
-                <button onclick="closeGoalCelebration()" class="w-full bg-gray-500 hover:bg-gray-600 text-white px-6 py-3 rounded-lg font-medium">
-                    🎊 Celebrate Later
-                </button>
+    <div id="goal-celebration-modal" class="celebration-overlay hidden">
+        <div class="celebration-card">
+            <h2>Goal Reached! 🎉</h2>
+            <p id="goal-celebration-message"></p>
+            <div class="btn-row" style="flex-direction: column;">
+                <button onclick="setNewGoal()" class="btn btn-solid" style="justify-content: center;">Set New Goal</button>
+                <button onclick="closeGoalCelebration()" class="btn btn-neutral" style="justify-content: center;">Celebrate Later</button>
             </div>
         </div>
     </div>
 
-    <!-- Transaction History Modal -->
-    <div id="transaction-history-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
-        <div class="bg-white rounded-lg shadow-xl p-6 max-w-4xl mx-4 w-full max-h-[80vh] overflow-hidden">
-            <div class="flex justify-between items-center mb-4">
-                <h2 class="text-2xl font-bold text-gray-800">📊 Transaction History</h2>
-                <button onclick="closeTransactionHistory()" class="text-gray-500 hover:text-gray-700 text-2xl">&times;</button>
-            </div>
-            
-            <!-- Filters -->
-            <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4 p-4 bg-gray-50 rounded-lg">
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Child</label>
-                    <select id="history-filter-kid" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+    <!-- Transaction History (drill-in view, not a modal) -->
+    <div id="transaction-history-modal" class="hidden">
+        <div class="view-header">
+            <button onclick="closeTransactionHistory()" class="back-link">&larr; Back</button>
+            <h2>Transaction History</h2>
+        </div>
+
+        <div class="card">
+            <div class="field-grid cols-2">
+                <div class="field">
+                    <label for="history-filter-kid">Child</label>
+                    <select id="history-filter-kid">
                         <option value="">All Kids</option>
                     </select>
                 </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Bucket</label>
-                    <select id="history-filter-bucket" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <div class="field">
+                    <label for="history-filter-bucket">Bucket</label>
+                    <select id="history-filter-bucket">
                         <option value="">All Buckets</option>
-                        <option value="save">💰 Save</option>
-                        <option value="spend">🛍️ Spend</option>
-                        <option value="share">❤️ Share</option>
-                        <option value="all">📅 Allowance</option>
+                        <option value="save">Save</option>
+                        <option value="spend">Spend</option>
+                        <option value="share">Share</option>
+                        <option value="all">Allowance</option>
                     </select>
                 </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Type</label>
-                    <select id="history-filter-type" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <div class="field">
+                    <label for="history-filter-type">Type</label>
+                    <select id="history-filter-type">
                         <option value="">All Types</option>
                         <option value="allowance">Allowance</option>
                         <option value="deduction">Spending</option>
                         <option value="goal_completed">Goal Completed</option>
                     </select>
                 </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Search</label>
-                    <input type="text" id="history-search" placeholder="Search descriptions..." class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <div class="field">
+                    <label for="history-search">Search</label>
+                    <input type="text" id="history-search" placeholder="Search descriptions...">
                 </div>
             </div>
-            
-            <!-- Transaction List -->
-            <div id="transaction-history-list" class="max-h-96 overflow-y-auto space-y-2">
-                <!-- Will be populated by JavaScript -->
+        </div>
+
+        <!-- Transaction List -->
+        <div id="transaction-history-list">
+            <!-- Will be populated by JavaScript -->
+        </div>
+
+        <div class="btn-row" style="justify-content: space-between; align-items: center; margin-top: 4px;">
+            <span id="transaction-count" class="kid-meta"></span>
+            <button onclick="exportTransactions()" class="btn btn-neutral">Export CSV</button>
+        </div>
+    </div>
+
+    <!-- Kid Profile Edit Sheet -->
+    <div id="kid-profile-modal" class="sheet-overlay hidden">
+        <div class="sheet">
+            <div class="sheet-header">
+                <h2>Edit Profile</h2>
+                <button onclick="closeKidProfileEdit()" class="sheet-close">Cancel</button>
             </div>
-            
-            <div class="mt-4 flex justify-between items-center">
-                <span id="transaction-count" class="text-sm text-gray-600"></span>
-                <button onclick="exportTransactions()" class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg font-medium">
-                    📄 Export CSV
-                </button>
+            <div class="sheet-body">
+                <div class="field">
+                    <label for="profile-name-input">Name</label>
+                    <input type="text" id="profile-name-input" placeholder="Child's name">
+                </div>
+                <div class="field">
+                    <label for="profile-age-input">Age</label>
+                    <input type="number" id="profile-age-input" min="1" max="18" placeholder="Age">
+                </div>
+                <div class="field">
+                    <label for="profile-birthday-input">Birthday</label>
+                    <input type="date" id="profile-birthday-input">
+                </div>
+                <div class="notice">
+                    <strong>Weekly Allowance Preview:</strong> <span id="allowance-preview">$0.00</span>
+                    <p style="margin-top: 4px;">Allowance is $1.00 per year of age.</p>
+                </div>
+            </div>
+            <div class="sheet-actions">
+                <button onclick="closeKidProfileEdit()" class="btn btn-neutral">Cancel</button>
+                <button onclick="saveKidProfile()" class="btn btn-solid">Save Changes</button>
             </div>
         </div>
     </div>
 
-    <!-- Goal Management Modal -->
-    <div id="goal-management-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
-        <div class="bg-white rounded-lg shadow-xl p-6 max-w-md mx-4 w-full">
-            <div class="flex justify-between items-center mb-4">
-                <h2 class="text-xl font-bold text-gray-800">🎯 Manage Savings Goal</h2>
-                <button onclick="closeGoalManagement()" class="text-gray-500 hover:text-gray-700 text-2xl">&times;</button>
+    <!-- Add Child Sheet -->
+    <div id="add-kid-modal" class="sheet-overlay hidden">
+        <div class="sheet">
+            <div class="sheet-header">
+                <h2>Add Child</h2>
+                <button onclick="closeAddKidModal()" class="sheet-close">Cancel</button>
             </div>
-            
-            <div class="space-y-4">
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Goal Name</label>
-                    <input type="text" id="goal-name-input" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="e.g., New Bike, Art Set">
+            <div class="sheet-body">
+                <div class="field">
+                    <label for="add-kid-name">Name</label>
+                    <input type="text" id="add-kid-name" placeholder="Child's name">
                 </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Target Amount</label>
-                    <input type="number" id="goal-target-input" step="0.01" min="0" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="0.00">
+                <div class="field">
+                    <label for="add-kid-birthday">Birthday</label>
+                    <input type="date" id="add-kid-birthday">
                 </div>
-            </div>
-            
-            <div class="flex space-x-3 mt-6">
-                <button onclick="saveGoal()" class="flex-1 bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-lg font-medium">
-                    💾 Save Goal
-                </button>
-                <button onclick="removeGoal()" class="flex-1 bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg font-medium">
-                    🗑️ Remove Goal
-                </button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Kid Profile Edit Modal -->
-    <div id="kid-profile-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
-        <div class="bg-white rounded-lg shadow-xl p-6 max-w-md mx-4 w-full">
-            <div class="flex justify-between items-center mb-4">
-                <h2 class="text-xl font-bold text-gray-800">✏️ Edit Kid Profile</h2>
-                <button onclick="closeKidProfileEdit()" class="text-gray-500 hover:text-gray-700 text-2xl">&times;</button>
-            </div>
-            
-            <div class="space-y-4">
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Name</label>
-                    <input type="text" id="profile-name-input" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Child's name">
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Age</label>
-                    <input type="number" id="profile-age-input" min="1" max="18" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Age">
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Birthday</label>
-                    <input type="date" id="profile-birthday-input" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
-                </div>
-            </div>
-            
-            <div class="mt-4 p-3 bg-blue-50 rounded-lg">
-                <div class="text-sm text-blue-800">
-                    <strong>Weekly Allowance Preview:</strong>
-                    <span id="allowance-preview">$0.00</span>
-                </div>
-                <div class="text-xs text-blue-600 mt-1">
-                    Allowance is $1.00 per year of age
-                </div>
-            </div>
-            
-            <div class="flex space-x-3 mt-6">
-                <button onclick="closeKidProfileEdit()" class="flex-1 bg-gray-500 hover:bg-gray-600 text-white px-4 py-2 rounded-lg font-medium">
-                    Cancel
-                </button>
-                <button onclick="saveKidProfile()" class="flex-1 bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-lg font-medium">
-                    💾 Save Changes
-                </button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Add Child Modal -->
-    <div id="add-kid-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
-        <div class="bg-white rounded-lg shadow-xl p-6 max-w-md mx-4 w-full">
-            <div class="flex justify-between items-center mb-4">
-                <h2 class="text-xl font-bold text-gray-800">👶 Add New Child</h2>
-                <button onclick="closeAddKidModal()" class="text-gray-500 hover:text-gray-700 text-2xl">&times;</button>
-            </div>
-            
-            <div class="space-y-4">
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Name</label>
-                    <input type="text" id="add-kid-name" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Child's name">
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Birthday</label>
-                    <input type="date" id="add-kid-birthday" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
-                </div>
-                <div class="grid grid-cols-3 gap-3">
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-1">💰 Save</label>
-                        <input type="number" id="add-kid-save" step="0.01" min="0" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-save" placeholder="0.00" value="0">
+                <div class="field-grid cols-3">
+                    <div class="field">
+                        <label for="add-kid-save">Starting Save</label>
+                        <input type="number" id="add-kid-save" step="0.01" min="0" inputmode="decimal" placeholder="0.00" value="0">
                     </div>
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-1">🛍️ Spend</label>
-                        <input type="number" id="add-kid-spend" step="0.01" min="0" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-spend" placeholder="0.00" value="0">
+                    <div class="field">
+                        <label for="add-kid-spend">Starting Spend</label>
+                        <input type="number" id="add-kid-spend" step="0.01" min="0" inputmode="decimal" placeholder="0.00" value="0">
                     </div>
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-1">❤️ Share</label>
-                        <input type="number" id="add-kid-share" step="0.01" min="0" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-share" placeholder="0.00" value="0">
+                    <div class="field">
+                        <label for="add-kid-share">Starting Share</label>
+                        <input type="number" id="add-kid-share" step="0.01" min="0" inputmode="decimal" placeholder="0.00" value="0">
                     </div>
                 </div>
-            </div>
-            
-            <div class="mt-4 p-3 bg-blue-50 rounded-lg">
-                <div class="text-sm text-blue-800">
-                    <strong>Weekly Allowance Preview:</strong>
-                    <span id="add-kid-allowance-preview">$0.00</span>
-                </div>
-                <div class="text-xs text-blue-600 mt-1">
-                    Allowance is $1.00 per year of age
+                <div class="notice">
+                    <strong>Weekly Allowance Preview:</strong> <span id="add-kid-allowance-preview">$0.00</span>
+                    <p style="margin-top: 4px;">Allowance is $1.00 per year of age.</p>
                 </div>
             </div>
-            
-            <div class="flex space-x-3 mt-6">
-                <button onclick="closeAddKidModal()" class="flex-1 bg-gray-500 hover:bg-gray-600 text-white px-4 py-2 rounded-lg font-medium">
-                    Cancel
-                </button>
-                <button onclick="saveNewKid()" class="flex-1 bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-lg font-medium">
-                    💾 Add Child
-                </button>
+            <div class="sheet-actions">
+                <button onclick="closeAddKidModal()" class="btn btn-neutral">Cancel</button>
+                <button onclick="saveNewKid()" class="btn btn-solid">Add Child</button>
             </div>
         </div>
     </div>
 
-    <!-- Allowance Confirmation Modal -->
-    <div id="allowance-confirmation-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
-        <div class="bg-white rounded-lg shadow-xl p-6 max-w-md mx-4 w-full">
-            <div class="flex justify-between items-center mb-4">
-                <h2 class="text-xl font-bold text-gray-800">📅 Add Weekly Allowance</h2>
-                <button onclick="closeAllowanceConfirmation()" class="text-gray-500 hover:text-gray-700 text-2xl">&times;</button>
+    <!-- Catch-Up Review Sheet -->
+    <div id="catchup-review-modal" class="sheet-overlay hidden">
+        <div class="sheet">
+            <div class="sheet-header">
+                <h2>Missed Allowance Review</h2>
+                <button onclick="closeCatchupReview()" class="sheet-close">Cancel</button>
             </div>
-            
-            <p class="text-gray-600 mb-4">This will add the following amounts:</p>
-            
-            <div id="allowance-preview-list" class="space-y-2 mb-6 p-4 bg-gray-50 rounded-lg">
-                <!-- Will be populated by JavaScript -->
-            </div>
-            
-            <div class="flex space-x-3">
-                <button onclick="closeAllowanceConfirmation()" class="flex-1 bg-gray-500 hover:bg-gray-600 text-white px-4 py-2 rounded-lg font-medium">
-                    Cancel
-                </button>
-                <button onclick="addWeeklyAllowance()" class="flex-1 bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-lg font-medium">
-                    ✅ Add Allowance
-                </button>
-            </div>
-        </div>
-    </div>
+            <div class="sheet-body">
+                <div class="notice">
+                    <div class="info-row">
+                        <span>Last allowance</span>
+                        <span class="val" id="last-allowance-date"></span>
+                    </div>
+                    <div class="info-row">
+                        <span>Today</span>
+                        <span class="val" id="current-date"></span>
+                    </div>
+                    <div class="info-row">
+                        <span>Missed weeks</span>
+                        <span class="val" id="missed-weeks-count"></span>
+                    </div>
+                </div>
 
-    <!-- Catch-Up Review Modal -->
-    <div id="catchup-review-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
-        <div class="bg-white rounded-lg shadow-xl p-6 max-w-2xl mx-4 w-full">
-            <div class="flex justify-between items-center mb-4">
-                <h2 class="text-xl font-bold text-gray-800">📅 Missed Allowance Review</h2>
-                <button onclick="closeCatchupReview()" class="text-gray-500 hover:text-gray-700 text-2xl">&times;</button>
-            </div>
-            
-            <div class="mb-4 p-4 bg-blue-50 rounded-lg">
-                <div class="flex justify-between text-sm text-blue-800">
-                    <span>Last allowance: <span id="last-allowance-date"></span></span>
-                    <span>Today: <span id="current-date"></span></span>
-                </div>
-                <div class="text-center mt-2">
-                    <span class="text-lg font-semibold text-blue-900">Missed weeks: <span id="missed-weeks-count"></span></span>
-                </div>
-            </div>
-            
-            <div class="space-y-4 mb-6">
-                <h3 class="font-semibold text-gray-700">Per Child:</h3>
+                <div class="section-title" style="margin-top: 8px;">Per Child</div>
                 <div id="catchup-kids-container">
                     <!-- Will be populated by JavaScript -->
                 </div>
             </div>
-            
-            <div class="flex space-x-3">
-                <button onclick="closeCatchupReview()" class="flex-1 bg-gray-500 hover:bg-gray-600 text-white px-4 py-2 rounded-lg font-medium">
-                    Cancel
-                </button>
-                <button onclick="addSelectedAllowances()" class="flex-1 bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-lg font-medium">
-                    Add Selected Allowances
-                </button>
+            <div class="sheet-actions">
+                <button onclick="closeCatchupReview()" class="btn btn-neutral">Cancel</button>
+                <button onclick="addSelectedAllowances()" class="btn btn-solid">Add Selected</button>
             </div>
         </div>
     </div>
