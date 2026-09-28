@@ -36,12 +36,13 @@ async function run() {
 
         const appData = row.data;
 
-        if (!shouldApplyAllowance(appData)) {
-            console.log('Allowance already applied recently -- nothing to do.');
+        const due = dueDates(appData);
+        if (due.length === 0) {
+            console.log('No allowance due -- nothing to do.');
             return;
         }
 
-        applyAllowanceToAppData(appData);
+        applyAllowanceToAppData(appData, due);
 
         const { data: updatedRows, error: updateError } = await supabase
             .from('family_data')
@@ -56,7 +57,7 @@ async function run() {
         }
 
         if (updatedRows && updatedRows.length > 0) {
-            console.log(`Weekly allowance applied for ${appData.kids.length} kid(s).`);
+            console.log(`Applied ${due.length} week(s) of allowance for ${appData.kids.length} kid(s).`);
             return;
         }
 
@@ -67,38 +68,47 @@ async function run() {
     process.exit(1);
 }
 
-// This job's own cron schedule pins the day/time allowance goes out, so it
-// only needs the "not too soon" guard -- mirrors the day-since check in
-// app.js's checkAndAddWeeklyAllowance().
-function shouldApplyAllowance(appData) {
-    if (!appData.settings.lastAllowanceDate) return true;
-    const daysSince = (Date.now() - new Date(appData.settings.lastAllowanceDate).getTime()) / (1000 * 60 * 60 * 24);
-    return daysSince >= 6.5; // small buffer under 7 for scheduling jitter
+// Every scheduled due instant since the last payment. Usually one; more than
+// one means earlier runs were missed (e.g. Supabase paused), and they are all
+// paid here rather than silently skipped.
+function dueDates(appData) {
+    if (!appData.settings.lastAllowanceDate) return [];
+    const allowanceDay = appData.settings.allowanceDay || 'sunday';
+    return allowanceLogic.scheduledAllowancesBetween(
+        new Date(appData.settings.lastAllowanceDate), new Date(), allowanceDay);
 }
 
-function applyAllowanceToAppData(appData) {
-    appData.kids.forEach(kid => {
-        const age = allowanceLogic.calculateAge(kid.birthday);
-        const distribution = allowanceLogic.distributeAllowance(age, appData.settings.rotationWeek);
+function applyAllowanceToAppData(appData, due) {
+    due.forEach((dueDate, i) => {
+        const catchUp = due.length > 1;
+        appData.kids.forEach(kid => {
+            const age = allowanceLogic.calculateAge(kid.birthday);
+            const distribution = allowanceLogic.distributeAllowance(age, appData.settings.rotationWeek);
 
-        kid.balances.save += distribution.save;
-        kid.balances.spend += distribution.spend;
-        kid.balances.share += distribution.share;
+            kid.balances.save += distribution.save;
+            kid.balances.spend += distribution.spend;
+            kid.balances.share += distribution.share;
 
-        appData.transactions.unshift({
-            id: Date.now() + kid.id,
-            date: new Date().toISOString(),
-            kidId: kid.id,
-            kidName: kid.name,
-            bucket: 'all',
-            amount: age,
-            description: 'Weekly allowance',
-            type: 'allowance'
+            appData.transactions.unshift({
+                id: Date.now() + kid.id + i,
+                date: new Date().toISOString(),
+                kidId: kid.id,
+                kidName: kid.name,
+                bucket: 'all',
+                amount: age,
+                description: catchUp
+                    ? `Weekly allowance for week of ${dueDate.toISOString().slice(0, 10)} (catch-up)`
+                    : 'Weekly allowance',
+                type: 'allowance'
+            });
         });
+
+        appData.settings.rotationWeek = allowanceLogic.nextRotationWeek(appData.settings.rotationWeek);
     });
 
-    appData.settings.rotationWeek = allowanceLogic.nextRotationWeek(appData.settings.rotationWeek);
-    appData.settings.lastAllowanceDate = new Date().toISOString();
+    // Stamp the last due instant paid, not "now", so a late run can't push the
+    // next due date out.
+    appData.settings.lastAllowanceDate = due[due.length - 1].toISOString();
 }
 
 run();

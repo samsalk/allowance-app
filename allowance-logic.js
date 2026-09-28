@@ -53,7 +53,40 @@ function previousRotationWeek(rotationWeek) {
     return rotationWeek === 1 ? 3 : rotationWeek - 1;
 }
 
-const allowanceLogic = { calculateAge, distributeAllowance, nextRotationWeek, previousRotationWeek };
+// Allowance is "due" at a fixed weekly instant: the configured allowance day at
+// ALLOWANCE_HOUR_UTC. Keep the hour in sync with the cron in
+// .github/workflows/weekly-allowance.yml. lastAllowanceDate is stamped with the
+// due instant that was paid (not the moment the code ran), so a late or manual
+// run can never push the next due date out and cause a week to be skipped.
+const ALLOWANCE_HOUR_UTC = 14;
+const DAY_INDEX = { sunday: 0, monday: 1, tuesday: 2, wednesday: 3, thursday: 4, friday: 5, saturday: 6 };
+
+// First due instant strictly after `after`.
+function nextScheduledAllowance(after, allowanceDay) {
+    const target = DAY_INDEX[allowanceDay] ?? 0;
+    const from = new Date(after);
+    const d = new Date(Date.UTC(from.getUTCFullYear(), from.getUTCMonth(), from.getUTCDate(), ALLOWANCE_HOUR_UTC));
+    while (d.getUTCDay() !== target || d <= from) {
+        d.setUTCDate(d.getUTCDate() + 1);
+    }
+    return d;
+}
+
+// Every due instant in (lastAllowanceDate, now], oldest first.
+function scheduledAllowancesBetween(lastAllowanceDate, now, allowanceDay) {
+    const due = [];
+    let next = nextScheduledAllowance(lastAllowanceDate, allowanceDay);
+    while (next <= now) {
+        due.push(next);
+        next = new Date(next.getTime() + 7 * 24 * 60 * 60 * 1000);
+    }
+    return due;
+}
+
+const allowanceLogic = {
+    calculateAge, distributeAllowance, nextRotationWeek, previousRotationWeek,
+    nextScheduledAllowance, scheduledAllowancesBetween
+};
 
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = allowanceLogic;

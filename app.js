@@ -561,29 +561,16 @@ async function checkAndAddWeeklyAllowance() {
     if (!appData.settings.lastAllowanceDate) {
         return; // First time setup, don't auto-add
     }
-    
-    const lastDate = new Date(appData.settings.lastAllowanceDate);
-    const now = new Date();
-    const daysSince = Math.floor((now - lastDate) / (1000 * 60 * 60 * 24));
-    
-    // Only add allowance on the configured allowance day (default: Sunday)
+
     const allowanceDay = appData.settings.allowanceDay || 'sunday';
-    const targetDayOfWeek = allowanceDay === 'sunday' ? 0 : 
-                           allowanceDay === 'monday' ? 1 :
-                           allowanceDay === 'tuesday' ? 2 :
-                           allowanceDay === 'wednesday' ? 3 :
-                           allowanceDay === 'thursday' ? 4 :
-                           allowanceDay === 'friday' ? 5 :
-                           allowanceDay === 'saturday' ? 6 : 0;
-    
-    const currentDayOfWeek = now.getDay();
-    
-    // Check if it's been at least a week AND it's the right day
-    if (daysSince >= 7 && currentDayOfWeek === targetDayOfWeek) {
-        console.log(`Adding weekly allowance on ${allowanceDay} (${daysSince} days since last)`);
+    const due = allowanceLogic.scheduledAllowancesBetween(
+        new Date(appData.settings.lastAllowanceDate), new Date(), allowanceDay);
+
+    // Exactly one week due: pay it. More than one is left to the catch-up
+    // review so nothing is applied blindly.
+    if (due.length === 1) {
+        console.log(`Adding weekly allowance due ${due[0].toISOString()}`);
         await addWeeklyAllowance();
-    } else if (daysSince >= 7) {
-        console.log(`Allowance due but waiting for ${allowanceDay} (today is ${['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][currentDayOfWeek]})`);
     }
 }
 
@@ -897,32 +884,14 @@ function getWeekDateRange(date) {
 
 // Helper function to calculate specific missed weeks
 function calculateMissedWeeks(lastAllowanceDate, currentDate) {
-    const missedWeeks = [];
-    const lastDate = new Date(lastAllowanceDate);
-    const now = new Date(currentDate);
-    
-    // Start from the week after the last allowance
-    let weekStart = new Date(lastDate);
-    weekStart.setDate(weekStart.getDate() + 7);
-    
-    // Find all missed weeks up to current week
-    while (weekStart <= now) {
-        const daysSinceWeekStart = Math.floor((now - weekStart) / (1000 * 60 * 60 * 24));
-        
-        // Only include weeks that are at least 7 days old (complete weeks)
-        if (daysSinceWeekStart >= 7) {
-            missedWeeks.push({
-                weekStart: new Date(weekStart),
-                weekEnd: new Date(weekStart.getTime() + 6 * 24 * 60 * 60 * 1000),
-                dateRange: getWeekDateRange(weekStart)
-            });
-        }
-        
-        // Move to next week
-        weekStart.setDate(weekStart.getDate() + 7);
-    }
-    
-    return missedWeeks;
+    const allowanceDay = appData.settings.allowanceDay || 'sunday';
+    return allowanceLogic.scheduledAllowancesBetween(new Date(lastAllowanceDate), new Date(currentDate), allowanceDay)
+        .map(dueDate => ({
+            dueDate,
+            weekStart: dueDate,
+            weekEnd: new Date(dueDate.getTime() + 6 * 24 * 60 * 60 * 1000),
+            dateRange: getWeekDateRange(dueDate)
+        }));
 }
 
 // Check for catch-up needed
@@ -1071,8 +1040,8 @@ async function addSelectedAllowances() {
         }
     });
 
-    // Update last allowance date
-    appData.settings.lastAllowanceDate = new Date().toISOString();
+    // Stamp the last due instant covered, not "now"
+    appData.settings.lastAllowanceDate = missedWeeksData.specificWeeks[missedWeeksData.specificWeeks.length - 1].dueDate.toISOString();
     await saveData();
 
     // Check for goal completions
@@ -1138,8 +1107,8 @@ async function addMissedAllowancesForWeeks(weeksToAdd) {
         addMissedAllowancesForKid(kid, weeksToAdd);
     });
 
-    // Update last allowance date
-    appData.settings.lastAllowanceDate = new Date().toISOString();
+    // Stamp the last due instant covered, not "now"
+    appData.settings.lastAllowanceDate = missedWeeksData.specificWeeks[missedWeeksData.specificWeeks.length - 1].dueDate.toISOString();
     await saveData();
 
     // Check for goal completions
@@ -1909,7 +1878,15 @@ async function addWeeklyAllowance() {
 
     // Update rotation week
     appData.settings.rotationWeek = allowanceLogic.nextRotationWeek(appData.settings.rotationWeek);
-    appData.settings.lastAllowanceDate = new Date().toISOString();
+    // Stamp the due instant this payment covers (the oldest unpaid one), or the
+    // upcoming one if paying ahead, so the next scheduled run isn't skipped or doubled.
+    const allowanceDay = appData.settings.allowanceDay || 'sunday';
+    const now = new Date();
+    const lastPaid = appData.settings.lastAllowanceDate ? new Date(appData.settings.lastAllowanceDate) : now;
+    const dueNow = allowanceLogic.scheduledAllowancesBetween(lastPaid, now, allowanceDay);
+    appData.settings.lastAllowanceDate = (dueNow.length > 0
+        ? dueNow[0]
+        : allowanceLogic.nextScheduledAllowance(now, allowanceDay)).toISOString();
 
     await saveData();
 
