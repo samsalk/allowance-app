@@ -1,26 +1,24 @@
-// Auth gate: the whole app sits behind one shared family login (see README).
-// This is a real Supabase Auth session, not just a UI overlay -- Row Level
-// Security on the `family_data` table rejects any request without one, so
-// the PIN is the only way in even if someone has the anon key from view-source.
+// Auth gate: the whole app sits behind one shared family PIN. The server
+// (api/login.js) checks it and sets a signed HttpOnly session cookie; every
+// /api/data request is rejected without that cookie, so this is real
+// enforcement, not just a UI overlay.
 
 // Entry point, called from app.js on DOMContentLoaded instead of loadData()
 // being called directly.
 async function initAuthGate() {
-    const { data: { session } } = await supabaseClient.auth.getSession();
+    let signedIn = false;
+    try {
+        const res = await fetch('/api/session', { credentials: 'same-origin' });
+        signedIn = res.ok;
+    } catch (e) {
+        signedIn = false;
+    }
 
-    if (session) {
+    if (signedIn) {
         await onLoginSuccess();
     } else {
         showLoginScreen();
     }
-
-    // Handles both an expired/revoked refresh token while the app is open,
-    // and a successful sign-in from the login form.
-    supabaseClient.auth.onAuthStateChange((_event, session) => {
-        if (!session) {
-            showLoginScreen();
-        }
-    });
 }
 
 async function onLoginSuccess() {
@@ -41,16 +39,24 @@ async function handleLoginSubmit(event) {
     submitBtn.disabled = true;
     submitBtn.textContent = 'Checking...';
 
-    const { error } = await supabaseClient.auth.signInWithPassword({
-        email: FAMILY_EMAIL,
-        password: pin
-    });
+    let ok = false;
+    try {
+        const res = await fetch('/api/login', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ pin })
+        });
+        ok = res.ok;
+    } catch (e) {
+        ok = false;
+    }
 
     submitBtn.disabled = false;
     submitBtn.textContent = 'Unlock';
 
-    if (error) {
-        errorEl.textContent = 'Incorrect PIN. Please try again.';
+    if (!ok) {
+        errorEl.textContent = 'Incorrect PIN or no connection. Please try again.';
         errorEl.classList.remove('hidden');
         pinInput.value = '';
         pinInput.focus();
@@ -78,7 +84,8 @@ function hideLoginScreen() {
 }
 
 async function signOut() {
-    await supabaseClient.auth.signOut();
-    // The onAuthStateChange listener above reacts to the session going away
-    // and shows the login screen -- no need to duplicate that here.
+    try {
+        await fetch('/api/logout', { method: 'POST', credentials: 'same-origin' });
+    } catch (e) { /* cookie expires on its own */ }
+    showLoginScreen();
 }

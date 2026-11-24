@@ -25,30 +25,30 @@ document.addEventListener('DOMContentLoaded', function() {
     initAuthGate();
 });
 
-// version of the family_data row as last fetched, used for the
-// optimistic-concurrency check in saveData().
+// ETag of the stored data as last fetched, used for the optimistic-concurrency
+// check in saveData(). null means nothing has been saved yet.
 let dataVersion = null;
 
-// Load data from Supabase into the in-memory appData object that the rest
+// Load data from the server into the in-memory appData object that the rest
 // of the app reads/mutates exactly like it always has.
 async function loadData() {
     try {
-        const { data: row, error } = await supabaseClient
-            .from('family_data')
-            .select('data, version')
-            .eq('id', 1)
-            .single();
-
-        if (error) throw error;
+        const res = await fetch('/api/data', { credentials: 'same-origin' });
+        if (res.status === 401) {
+            showLoginScreen();
+            return;
+        }
+        if (!res.ok) throw new Error('Load failed: ' + res.status);
+        const row = await res.json();
 
         appData = row.data;
-        dataVersion = row.version;
+        dataVersion = row.etag;
 
         // Read-only local cache for instant paint / offline viewing only --
         // never treated as the source of truth on load.
         localStorage.setItem('saveSpendShareData_cache', JSON.stringify(appData));
 
-        console.log('Data loaded successfully from Supabase');
+        console.log('Data loaded successfully');
 
         // Migrate existing data to birthday-only system
         await migrateToCalculatedAges();
@@ -84,31 +84,32 @@ async function migrateToCalculatedAges() {
     }
 }
 
-// Save appData to Supabase, using the row's version as an optimistic
-// concurrency check: if another device saved since we last loaded, this
-// update matches zero rows instead of silently overwriting their change.
+// Save appData to the server, sending the ETag we last loaded as an
+// optimistic concurrency check: if another device saved since, the server
+// answers 409 instead of silently overwriting their change.
 async function saveData() {
     try {
-        const { data: rows, error } = await supabaseClient
-            .from('family_data')
-            .update({
-                data: appData,
-                version: dataVersion + 1,
-                updated_at: new Date().toISOString()
-            })
-            .eq('id', 1)
-            .eq('version', dataVersion)
-            .select();
+        const res = await fetch('/api/data', {
+            method: 'PUT',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ data: appData, etag: dataVersion })
+        });
 
-        if (error) throw error;
+        if (res.status === 401) {
+            showLoginScreen();
+            return false;
+        }
 
-        if (!rows || rows.length === 0) {
+        if (res.status === 409) {
             alert('Someone else just saved a change on another device. Reloading the latest data -- please redo your last action.');
             await loadData();
             return false;
         }
 
-        dataVersion += 1;
+        if (!res.ok) throw new Error('Save failed: ' + res.status);
+
+        dataVersion = (await res.json()).etag;
         localStorage.setItem('saveSpendShareData_cache', JSON.stringify(appData));
         console.log('Data saved successfully at', new Date().toISOString());
         return true;
@@ -120,7 +121,7 @@ async function saveData() {
 }
 
 // Disables the triggering button and swaps its label while an async action
-// runs -- every mutating action is now a real network round-trip (Supabase),
+// runs -- every mutating action is now a real network round-trip (network),
 // not instant localStorage, so buttons need to show that something's happening.
 async function withLoading(btn, loadingLabel, fn) {
     const originalText = btn.textContent;

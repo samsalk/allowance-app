@@ -4,35 +4,34 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-Salkinomics (formerly "Save, Spend, Share") — a family allowance tracker where each kid's money is split into three buckets: Save, Spend, Share. Originally a localStorage-only static page; now a hosted app backed by Supabase. Live at https://samsalk.github.io/allowance-app/.
+Salkinomics (formerly "Save, Spend, Share") — a family allowance tracker where each kid's money is split into three buckets: Save, Spend, Share. Originally a localStorage-only static page; now hosted on Vercel (static frontend + serverless functions in `api/`) with state stored in a private Vercel Blob.
 
 ## Commands
 
-No build step, no bundler, no package.json, no test suite — this is plain HTML/CSS/JS served as static files.
+No build step, no bundler, no test suite — plain HTML/CSS/JS served as static files, plus Node serverless functions in `api/`. `package.json` exists only for the `@vercel/blob` dependency.
 
-- **Local dev server**: `python3 -m http.server 8000` from the repo root, then open `http://localhost:8000`. Must be served over `http://`, not opened as a `file://` path — Supabase Auth needs a real origin.
-- **Syntax-check JS**: `node --check app.js` (Node isn't a project dependency; only needed if available locally).
-- **Weekly allowance script** (`scripts/apply-weekly-allowance.js`) needs `@supabase/supabase-js`, which isn't vendored in the repo — to run it locally, `npm install @supabase/supabase-js@2 --no-save` in a scratch directory first, then run it with `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` env vars set (the latter from Supabase dashboard → Project Settings → API — never commit it).
-- **Data migration helper**: `python3 scripts/generate-migration-sql.py <backup.json>` — converts an old localStorage "Backup Data" export into a SQL statement for the Supabase SQL editor.
+- **Local dev**: `npm install`, `vercel link`, `vercel env pull .env.local`, then `vercel dev` (serves the static files and `api/` together). A plain `python3 -m http.server` no longer works — the app needs `/api/*`.
+- **Syntax-check JS**: `node --check app.js` (and the files in `api/`, `lib/`).
+- **Data import helper**: `node --env-file=.env.local scripts/import-data.js <backup.json>` loads an exported `{kids, settings, transactions}` JSON into the blob (refuses to overwrite existing data).
 
 ## Architecture
 
 ### Script load order matters (index.html)
-Tailwind CDN → Supabase JS CDN → `config.js` (defines `supabaseClient`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `FAMILY_EMAIL`) → `allowance-logic.js` (defines the global `allowanceLogic` object) → `auth.js` (session/login) → `app.js` (everything else). Each later file depends on globals the earlier ones define.
+Tailwind CDN → `allowance-logic.js` (defines the global `allowanceLogic` object) → `auth.js` (session/login) → `app.js` (everything else). Each later file depends on globals the earlier ones define.
 
-### Data model: one JSON blob, not normalized tables
-The entire app state — `{ kids: [...], settings: {...}, transactions: [...] }` — lives as a single `jsonb` value in one row of the `family_data` table in Postgres (`supabase/migrations/0001_family_data.sql`). The in-memory `appData` object in `app.js` has exactly this shape; `loadData()`/`saveData()` just read/write the whole blob. There's no per-table schema to keep in sync — a new field on a kid or transaction just needs to exist in the JS object.
+### Data model: one JSON blob
+The entire app state — `{ kids: [...], settings: {...}, transactions: [...] }` — is a single private Vercel Blob (`family-data.json`, see `lib/store.js`). The in-memory `appData` object in `app.js` has exactly this shape; `loadData()`/`saveData()` GET/PUT it via `/api/data`. A new field on a kid or transaction just needs to exist in the JS object.
 
-Saves use optimistic concurrency (`dataVersion` in `app.js`): `saveData()` sends the row's last-known `version` and only succeeds if it still matches server-side; on mismatch it alerts the user and reloads rather than silently overwriting a concurrent edit from another device.
+Saves use optimistic concurrency: the blob's ETag is kept in `dataVersion` in `app.js`; `PUT /api/data` sends it back and the server writes with `ifMatch`, answering 409 on mismatch, at which point the client alerts and reloads rather than overwriting another device's edit. Reads use `useCache: false` so they never see a stale overwrite.
 
-### Auth: one shared login, not per-user accounts
-A single fixed Supabase Auth user (family email + password) backs the whole app; the password is presented to end users as a shared family PIN. Row Level Security on `family_data` requires `role = 'authenticated'` for all access — the anon key alone (necessarily public in `config.js`) cannot read or write anything on its own. **Gotcha**: tables created via the Supabase SQL editor (raw SQL) do *not* get the automatic role grants that tables created via the dashboard Table Editor get — `authenticated` and `service_role` both needed explicit `grant` statements, already present in the migration file. If a future table/migration mysteriously gets "permission denied" despite correct RLS policies and correct keys, check for a missing grant first.
+### Auth: one shared PIN, not per-user accounts
+`POST /api/login` compares the PIN to the `FAMILY_PIN` env var and sets a signed HttpOnly cookie (`SESSION_SECRET`, `lib/session.js`). `/api/data` and `/api/session` reject requests without it. The Blob token never reaches the browser. There is no real rate limiting on PIN attempts (just a delay).
 
 ### Allowance math lives in one place, used by two runtimes
-`allowance-logic.js` holds the pure functions for age-from-birthday and the weekly distribution rule (base amount = `floor(age/3)` per bucket, remainder distributed round-robin via a rotating `rotationWeek` counter that cycles 1→2→3→1). It's written to work unmodified as both a browser `<script>` (attaches `window.allowanceLogic`) and a Node `require()` (CommonJS `module.exports`). `lastAllowanceDate` is stamped with the scheduled due instant (allowance day at `ALLOWANCE_HOUR_UTC`, kept in sync with the workflow cron), never "now", so late/manual runs can't skip a week; `scheduledAllowancesBetween()` lists what's due. Both `app.js` (the live UI) and `scripts/apply-weekly-allowance.js` (the cron job) import it — never reimplement this math inline in either place; it has to stay identical in both or the scheduled job and the UI will disagree.
+`allowance-logic.js` holds the pure functions for age-from-birthday and the weekly distribution rule (base amount = `floor(age/3)` per bucket, remainder distributed round-robin via a rotating `rotationWeek` counter that cycles 1→2→3→1). It works unmodified as both a browser `<script>` (attaches `window.allowanceLogic`) and a Node `require()`. `lastAllowanceDate` is stamped with the scheduled due instant (allowance day at `ALLOWANCE_HOUR_UTC`, kept in sync with the cron in `vercel.json`), never "now", so late/manual runs can't skip a week; `scheduledAllowancesBetween()` lists what's due. Both `app.js` (the live UI) and `lib/weekly-allowance.js` (the cron route) use it — never reimplement this math inline in either place.
 
-### Weekly allowance is applied by a cron job, not the client
-`.github/workflows/weekly-allowance.yml` runs `scripts/apply-weekly-allowance.js` on a schedule (Sundays 14:00 UTC) plus on-demand via `workflow_dispatch`. It authenticates with the `service_role` key (a GitHub Actions repo secret — bypasses RLS, must never be committed or appear in browser code) and applies the same version-checked update pattern as the client. Requires Node 22+ in the workflow — `@supabase/supabase-js` initializes a Realtime client that needs native `WebSocket` support Node 20 lacks. The client-side `checkAndAddWeeklyAllowance()` in `app.js` still exists as a fallback for whenever someone happens to open the app on the configured day, but the cron is the reliable path.
+### Weekly allowance is applied by Vercel Cron, not the client
+`vercel.json` schedules `GET /api/cron-allowance` Sundays 14:00 UTC (Hobby plan crons may fire anywhere within that hour, which is fine since lastAllowanceDate is stamped with the due instant). Vercel authenticates it with `Authorization: Bearer $CRON_SECRET`. The route reads the blob, applies all due weeks via `lib/weekly-allowance.js`, and writes with `ifMatch`, retrying on conflict. The client-side `checkAndAddWeeklyAllowance()` in `app.js` remains as a fallback.
 
 ### Mobile UI patterns — not everything is a modal
 Designed mobile-first; different interaction types get deliberately different treatment (see `styles.css`, the "Comic Pop" design system: bold outlines, flat colors, halftone texture, hard offset shadows; fonts are Anton + Archivo Narrow via Google Fonts):
@@ -45,12 +44,11 @@ Designed mobile-first; different interaction types get deliberately different tr
 Some class names serve double duty: they're visual-style hooks in the design system *and*, in unrelated markup, would-be JS `querySelector` hooks. `.kid-name`/`.goal-name` are styled heading classes (kid names, goal names on cards); the setup wizard's raw text `<input>` fields for entering a name use `.kid-name-input`/`.goal-name-input` specifically to avoid an input silently inheriting heading typography. When adding a new form field, check `styles.css` first rather than reusing a class that's already a display style elsewhere.
 
 ### Every mutating action goes through `withLoading`
-Buttons that call an `async` mutating function are wired as `onclick="withLoading(this, 'Saving…', someAsyncFn)"` (helper defined in `app.js`) — it disables the button and swaps its label for the duration of the Supabase round-trip. Saves are real network calls now, not instant `localStorage` writes; a button with no loading state will look unresponsive on a slow connection.
+Buttons that call an `async` mutating function are wired as `onclick="withLoading(this, 'Saving…', someAsyncFn)"` (helper defined in `app.js`) — it disables the button and swaps its label for the duration of the network round-trip. Saves are real network calls now, not instant `localStorage` writes; a button with no loading state will look unresponsive on a slow connection.
 
 ### Secrets
-- `config.js` holds `SUPABASE_URL` and `SUPABASE_ANON_KEY` — **not secret**, safe to commit; security is enforced by RLS requiring an authenticated session, not by hiding these.
-- The `service_role` key is the only real secret in this project. It lives solely as the `SUPABASE_SERVICE_ROLE_KEY` GitHub Actions repo secret, used by the cron workflow and manually when running the migration script locally. It must never be committed, logged, or transmitted through chat/tooling — any change involving it should be done by the user directly via `gh secret set` or the Supabase dashboard.
+Vercel project env vars (never committed): `FAMILY_PIN`, `SESSION_SECRET` (long random string), `CRON_SECRET`, plus `BLOB_STORE_ID`/`BLOB_WEBHOOK_PUBLIC_KEY` (added automatically when the private Blob store is connected; auth is OIDC, so no `BLOB_READ_WRITE_TOKEN` is needed on Vercel — locally, `vercel env pull` supplies a short-lived `VERCEL_OIDC_TOKEN`). The one store is shared by Production and Preview deployments. Set them via the Vercel dashboard or `vercel env add` yourself — don't pass them through chat/tooling.
 
 ## Deployment
 
-Static files served as-is via GitHub Pages (`main` branch, root), auto-deploys on push — no build step. The backend is a separate Supabase project (Postgres + Auth), not part of this repo's deploy process; schema changes go in `supabase/migrations/` and must be applied manually via the Supabase SQL editor (there's no migration-runner CLI wired up).
+Hosted on Vercel; pushes to `main` auto-deploy once the repo is connected to the Vercel project. No build step. Previously this ran on GitHub Pages + Supabase (free-tier pausing caused repeated failures), which is why those pieces and their workflows were removed.

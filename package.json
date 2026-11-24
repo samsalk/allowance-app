@@ -1,0 +1,9 @@
+{
+  "name": "salkinomics",
+  "private": true,
+  "description": "Family allowance tracker (static frontend + Vercel functions + Vercel Blob)",
+  "engines": { "node": "22.x" },
+  "dependencies": {
+    "@vercel/blob": "^2.0.0"
+  }
+}

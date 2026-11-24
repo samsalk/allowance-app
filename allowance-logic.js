@@ -55,7 +55,7 @@ function previousRotationWeek(rotationWeek) {
 
 // Allowance is "due" at a fixed weekly instant: the configured allowance day at
 // ALLOWANCE_HOUR_UTC. Keep the hour in sync with the cron in
-// .github/workflows/weekly-allowance.yml. lastAllowanceDate is stamped with the
+// vercel.json. lastAllowanceDate is stamped with the
 // due instant that was paid (not the moment the code ran), so a late or manual
 // run can never push the next due date out and cause a week to be skipped.
 const ALLOWANCE_HOUR_UTC = 14;
