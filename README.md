@@ -49,29 +49,30 @@ A web-based allowance tracking application that helps families teach kids about 
 - Individual balance tracking per child
 
 **Data Management**
-- Stored in a real database (Supabase/Postgres), synced across every device you log into
+- Stored server-side (a private Vercel Blob), synced across every device you log into
 - Manual backup/export to JSON
 - Transaction history with search and filters
 
 ## Getting Started
 
-This app is hosted: a static frontend (this repo, served as-is, no build step) talking to a [Supabase](https://supabase.com) project for storage and auth, with a scheduled GitHub Action applying weekly allowance so it doesn't depend on anyone opening the app on the right day.
-
-**Live at:** https://samsalk.github.io/allowance-app/
+This app is hosted on [Vercel](https://vercel.com): a static frontend (this repo, no build step), a few serverless functions in `api/` that gate and store the data, and a Vercel Schedule that applies the weekly allowance so it doesn't depend on anyone opening the app on the right day.
 
 ### One-time setup
 
-1. **Create a Supabase project** (free tier is fine) at supabase.com.
-2. **Run the schema**: paste `supabase/migrations/0001_family_data.sql` into the Supabase SQL editor and run it. This creates the single `family_data` table (holding the whole app's state as one JSON document) with Row Level Security restricted to authenticated requests only.
-3. **Create the shared family login**: in the Supabase dashboard, Authentication → Users → Add user. Use any email (doesn't need to be real/reachable) and a 6-8 character password -- that password *is* the family PIN everyone uses to unlock the app.
-4. **Fill in `config.js`** with your project's URL and anon public key (Project Settings → API), and the email from step 3.
-5. **Migrate existing data**, if coming from an older localStorage-based copy of this app: use that copy's "Backup Data" button to export a JSON file, then run `python3 scripts/generate-migration-sql.py <the-backup-file>.json` and paste the printed SQL into the Supabase SQL editor. Starting fresh instead? Skip this -- the setup wizard in-app handles it.
-6. **Deploy the frontend**: this repo is deployed via GitHub Pages (Settings → Pages → Deploy from a branch → `main` / root) -- auto-deploys on every push to `main`, no build command needed since it's served as static files. Cloudflare Pages or Netlify work just as well if you'd rather not use GitHub Pages.
-7. **Set up the weekly allowance job**: add `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` (Project Settings → API -- keep this one secret, unlike the anon key) as GitHub Actions repo secrets, so `.github/workflows/weekly-allowance.yml` can run. Trigger it once manually (Actions tab → Weekly Allowance → Run workflow) to confirm it works before trusting the schedule.
+1. **Create a Vercel project** from this repo (`vercel link`, or import it in the dashboard). Framework preset: Other, no build command.
+2. **Create a private Blob store** (project → Storage → Create → Blob, access **Private** -- this can't be changed later) and connect it to the project for Production, Preview and Development. Auth is OIDC, so no token needs copying.
+3. **Set the secrets** (never commit them):
+   - `FAMILY_PIN` -- the shared PIN everyone uses to unlock the app (6+ digits recommended; wrong guesses are only slowed down, not rate limited)
+   - `SESSION_SECRET` -- a long random string that signs the login cookie (`openssl rand -hex 32`)
+
+   e.g. `openssl rand -hex 32 | vercel env add SESSION_SECRET production`
+4. **Turn off Deployment Protection** for Production (Settings → Deployment Protection) so family members aren't asked to log in to Vercel first. The PIN is the real gate.
+5. **Deploy** (`vercel deploy --prod`, or push to the git-connected branch). The weekly schedule in `vercel.json` registers automatically; check it with `vercel schedules list`.
+6. **Existing data?** Use the in-app setup wizard to start fresh, or load an exported `{kids, settings, transactions}` JSON once with `scripts/import-data.js` (needs blob credentials locally; see the script's header).
 
 ### Local development
 
-Serve the repo root with any static file server (e.g. `python3 -m http.server`) and open it at `http://localhost:<port>` -- not as a `file://` path, since Supabase auth needs a real origin. Point `config.js` at a Supabase project (a separate test project is recommended over your real family data while developing).
+`npm install`, `vercel link`, `vercel env pull .env.local`, then `vercel dev`. A plain static server won't work because the app needs `/api/*`. Use a separate Vercel project/Blob store for experiments so you don't touch real family data.
 
 ### Setup Wizard
 
@@ -121,8 +122,8 @@ The app guides you through a 3-step setup process:
 ### Technology Stack
 - Pure HTML5, CSS3, and JavaScript -- no build step, no bundler, no framework
 - Custom design system in `styles.css` ("Comic Pop": bold outlines, flat colors, halftone texture), fonts via Google Fonts (Anton + Archivo Narrow). TailwindCSS (CDN) is still loaded for a handful of base utilities but isn't the primary styling layer.
-- [Supabase](https://supabase.com) (Postgres + Auth) via `@supabase/supabase-js` (CDN) for storage and the shared login
-- A GitHub Actions scheduled workflow for reliably applying weekly allowance server-side
+- Node serverless functions in `api/` (login, session, data) on Vercel, with state in a private [Vercel Blob](https://vercel.com/docs/vercel-blob)
+- A [Vercel Schedule](https://vercel.com/docs/schedules) (`vercel.json`) running `api/cron-allowance.mjs` weekly to apply allowance server-side
 
 ### Mobile-First UI
 Built for phones first, not adapted from a desktop layout after the fact:
@@ -132,10 +133,10 @@ Built for phones first, not adapted from a desktop layout after the fact:
 - Every action that saves shows a loading state on its button (disabled + relabeled, e.g. "Saving…") while the network request is in flight
 
 ### Data Storage
-- All app state (`kids`, `settings`, `transactions`) lives as a single JSON document in one row of a `family_data` table in Postgres -- see `supabase/migrations/0001_family_data.sql`
-- Row Level Security requires a real authenticated session for any read or write; the frontend's anon key alone cannot access the data
-- Saves use optimistic concurrency (a `version` column): if two devices save near-simultaneously, the second one is told to reload and retry rather than silently overwriting the first
-- A read-only copy is cached in the browser's `localStorage` for instant paint on load, but Supabase is always the source of truth
+- All app state (`kids`, `settings`, `transactions`) is a single JSON document stored as one private blob (`family-data.json`), read and written only through `/api/data`
+- Every `/api/data` request needs a signed, HttpOnly session cookie issued by `/api/login` after the PIN is checked; the Blob credentials never reach the browser
+- Saves use optimistic concurrency (the blob's ETag): if two devices save near-simultaneously, the second one is told to reload and retry rather than silently overwriting the first
+- A read-only copy is cached in the browser's `localStorage` for instant paint on load, but the server is always the source of truth
 - Manual export to JSON remains available via the Backup Data button
 
 ### Browser Compatibility
@@ -167,7 +168,7 @@ Each child receives $1 per year of age weekly. The amount is distributed as foll
 
 ## Data Structure
 
-The app's in-memory state (and the `data` column of the `family_data` table in Supabase) uses the following shape -- unchanged from the original localStorage-only version:
+The app's in-memory state (and the stored blob) uses the following shape -- unchanged from the original localStorage-only version:
 
 ```javascript
 {
@@ -210,10 +211,10 @@ The app's in-memory state (and the `data` column of the `family_data` table in S
 
 ## Privacy & Security
 
-- The app is protected by a single shared family login (a PIN, which is really the password for one shared Supabase Auth account) -- there's no meaningful reason to have separate parent/kid accounts for this app, but that also means anyone with the PIN has full access
-- Data lives in your own Supabase project's Postgres database, not a third-party service you don't control
-- Row Level Security rejects any request without a valid session, so the frontend's publicly-visible anon key cannot be used to read or write data on its own
-- The Supabase `service_role` key (full access, bypasses the above) is used only by the local migration script and the GitHub Actions weekly-allowance job, via a repo secret -- it's never shipped to the browser or committed to the repo
+- The app is protected by a single shared family PIN (checked server-side, exchanged for a signed cookie) -- there's no meaningful reason to have separate parent/kid accounts for this app, but that also means anyone with the PIN has full access. Failed attempts are delayed but not rate limited, so use a longer PIN.
+- Data lives in a private Blob store in your own Vercel account, readable only by your project's functions
+- The weekly job is a private function target: it has no public URL and nothing to authenticate
+- Secrets (`FAMILY_PIN`, `SESSION_SECRET`) are Vercel environment variables, never committed or shipped to the browser
 - Manual export to JSON remains available for your own backups
 
 ## Contributing
