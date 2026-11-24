@@ -1031,6 +1031,7 @@ async function addSelectedAllowances() {
     if (!missedWeeksData) return;
 
     let totalAdded = 0;
+    let maxWeeks = 0;
     appData.kids.forEach(kid => {
         const weeksSelect = document.getElementById(`catchup-weeks-${kid.id}`);
         const weeksToAdd = parseInt(weeksSelect.value);
@@ -1038,8 +1039,10 @@ async function addSelectedAllowances() {
         if (weeksToAdd > 0) {
             addMissedAllowancesForKid(kid, weeksToAdd);
             totalAdded += weeksToAdd;
+            maxWeeks = Math.max(maxWeeks, weeksToAdd);
         }
     });
+    advanceRotationWeek(maxWeeks);
 
     // Stamp the last due instant covered, not "now"
     appData.settings.lastAllowanceDate = missedWeeksData.specificWeeks[missedWeeksData.specificWeeks.length - 1].dueDate.toISOString();
@@ -1097,9 +1100,13 @@ function addMissedAllowancesForKid(kid, weeksToAdd) {
 
         appData.transactions.unshift(transaction);
     }
+    // rotationWeek is shared by all kids, so callers advance it once after
+    // every kid has been processed (advancing here skewed later kids).
+}
 
-    // Update rotation week
-    appData.settings.rotationWeek = ((appData.settings.rotationWeek - 1 + weeksToAdd) % 3) + 1;
+// Advance the shared rotation counter by the number of weeks paid out.
+function advanceRotationWeek(weeks) {
+    appData.settings.rotationWeek = ((appData.settings.rotationWeek - 1 + weeks) % 3) + 1;
 }
 
 // Add missed allowances for all kids for specified weeks
@@ -1107,6 +1114,7 @@ async function addMissedAllowancesForWeeks(weeksToAdd) {
     appData.kids.forEach(kid => {
         addMissedAllowancesForKid(kid, weeksToAdd);
     });
+    advanceRotationWeek(weeksToAdd);
 
     // Stamp the last due instant covered, not "now"
     appData.settings.lastAllowanceDate = missedWeeksData.specificWeeks[missedWeeksData.specificWeeks.length - 1].dueDate.toISOString();
