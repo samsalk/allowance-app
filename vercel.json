@@ -1,5 +1,14 @@
 {
-  "crons": [
-    { "path": "/api/cron-allowance", "schedule": "0 14 * * 0" }
-  ]
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "functions": {
+    "api/cron-allowance.mjs": {
+      "experimentalTriggers": [{ "type": "schedule/v1beta" }]
+    }
+  },
+  "schedules": {
+    "weekly-allowance": {
+      "schedule": "0 14 * * 0",
+      "function": "api/cron-allowance"
+    }
+  }
 }
